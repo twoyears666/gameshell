@@ -1,0 +1,23 @@
+# Xcode / 构建产物
+build/
+DerivedData/
+*.xcuserdatad/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# XcodeGen 生成物（由 project.yml 生成，不入库）
+*.xcodeproj/
+Sources/Resources/Info.plist
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.swiftpm/
+.build/
+
+# 归档与产物
+*.ipa
+*.dSYM.zip
+*.xcarchive

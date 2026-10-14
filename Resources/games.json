@@ -1,0 +1,151 @@
+{
+  "title": "Gameshell",
+  "subtitle": "URL 驱动的游戏启动器",
+  "categories": ["全部", "Web", "街机", "棋牌", "休闲"],
+  "games": [
+    {
+      "id": "2048",
+      "name": "2048",
+      "icon": "square.grid.3x3.fill",
+      "url": "https://play2048.co/",
+      "platform": "休闲",
+      "controllerSupport": false,
+      "rating": 8.6,
+      "description": "经典数字合并益智游戏，方向键或滑动操作。",
+      "tags": ["益智", "数字", "键鼠"],
+      "accent": "#FF7A18"
+    },
+    {
+      "id": "hextris",
+      "name": "Hextris",
+      "icon": "hexagon.fill",
+      "url": "https://hextris.io/",
+      "platform": "休闲",
+      "controllerSupport": false,
+      "rating": 8.1,
+      "description": "六边形版俄罗斯方块，节奏明快、上手极快。",
+      "tags": ["休闲", "敏捷"],
+      "accent": "#FF4FA3"
+    },
+    {
+      "id": "react-tetris",
+      "name": "React Tetris",
+      "icon": "square.stack.3d.up.fill",
+      "url": "https://chvin.github.io/react-tetris/",
+      "platform": "街机",
+      "controllerSupport": false,
+      "rating": 8.9,
+      "description": "网页复刻版俄罗斯方块，键盘操控，带音乐与连消。",
+      "tags": ["街机", "俄罗斯方块", "键鼠"],
+      "accent": "#9B5CFF"
+    },
+    {
+      "id": "pacman",
+      "name": "Pac-Man (Doodle)",
+      "icon": "circle.circle.fill",
+      "url": "https://www.google.com/logos/2010/pacman10-i.html",
+      "platform": "街机",
+      "controllerSupport": false,
+      "rating": 9.2,
+      "description": "吃豆人：左右方向键操控，经典街机体验。",
+      "tags": ["街机", "经典", "键鼠"],
+      "accent": "#FFD528"
+    },
+    {
+      "id": "sudoku",
+      "name": "Sudoku",
+      "icon": "tablecells.fill",
+      "url": "https://sudoku.com/",
+      "platform": "棋牌",
+      "controllerSupport": false,
+      "rating": 8.0,
+      "description": "数独：多种难度，鼠标点选格子填入数字。",
+      "tags": ["棋牌", "益智"],
+      "accent": "#4FA3FF"
+    },
+    {
+      "id": "chess",
+      "name": "Chess",
+      "icon": "crown.fill",
+      "url": "https://www.chess.com/play",
+      "platform": "棋牌",
+      "controllerSupport": false,
+      "rating": 8.4,
+      "description": "在线国际象棋对局，鼠标拖拽走子。",
+      "tags": ["棋牌", "对弈"],
+      "accent": "#9AA0A6"
+    },
+    {
+      "id": "slither",
+      "name": "Slither.io",
+      "icon": "circle.hexagongrid.fill",
+      "url": "https://slither.io/",
+      "platform": "Web",
+      "controllerSupport": false,
+      "rating": 8.3,
+      "description": "多人贪吃蛇：鼠标控制方向，含昵称与实时排行榜。",
+      "tags": ["多人", "在线"],
+      "accent": "#5CE1E6"
+    },
+    {
+      "id": "agar",
+      "name": "Agar.io",
+      "icon": "circle.grid.cross.fill",
+      "url": "https://agar.io/",
+      "platform": "Web",
+      "controllerSupport": false,
+      "rating": 7.9,
+      "description": "细胞吞噬大作战，鼠标移动、空格分裂。",
+      "tags": ["多人", "在线"],
+      "accent": "#7BE38A"
+    },
+    {
+      "id": "krunker",
+      "name": "Krunker",
+      "icon": "scope",
+      "url": "https://krunker.io/",
+      "platform": "Web",
+      "controllerSupport": true,
+      "rating": 8.7,
+      "description": "低配也能跑的网页 FPS，WASD + 鼠标，支持手柄。",
+      "tags": ["射击", "多人", "键鼠", "手柄"],
+      "accent": "#FF7A18"
+    },
+    {
+      "id": "wordle",
+      "name": "Wordle",
+      "icon": "textformat.abc",
+      "url": "https://www.nytimes.com/games/wordle/index.html",
+      "platform": "休闲",
+      "controllerSupport": false,
+      "rating": 8.2,
+      "description": "每日猜词游戏，键盘输入字母、回车提交。",
+      "tags": ["文字", "益智", "键鼠"],
+      "accent": "#A0C93B"
+    },
+    {
+      "id": "cookie-clicker",
+      "name": "Cookie Clicker",
+      "icon": "circle.hexagongrid.circle.fill",
+      "url": "https://orteil.dashnet.org/cookieclicker/",
+      "platform": "休闲",
+      "controllerSupport": false,
+      "rating": 7.8,
+      "description": "点击曲奇饼的放置类游戏，鼠标点满屏幕。",
+      "tags": ["放置", "休闲"],
+      "accent": "#D9A05B"
+    },
+    {
+      "id": "bomberman-lite",
+      "name": "Bomberman (Demo)",
+      "icon": "burst.fill",
+      "url": "https://bomberman-demo.github.io/",
+      "platform": "街机",
+      "controllerSupport": true,
+      "rating": 7.5,
+      "description": "【未完成】示例条目：占位用的炸弹人 Demo，仅用于演示清单结构与手柄标记。",
+      "tags": ["街机", "手柄", "未完成"],
+      "accent": "#FF4FA3"
+    }
+  ]
+}
