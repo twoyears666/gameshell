@@ -174,7 +174,7 @@
 }
 
 - (BOOL)persistToUserStore {
-    NSURL *url = [self userStoreURL];
+    NSURL *url = [GSGameManifest userStoreURL];
     if (url == nil) {
         return NO;
     }
