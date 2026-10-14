@@ -203,7 +203,7 @@ final class AppState: ObservableObject {
         self.inputSummary = manager.snapshot.summaryText()
 
         inputObserver = NotificationCenter.default.addObserver(
-            forName: GSInputManagerDidUpdateNotification,
+            forName: .GSInputManagerDidUpdate,
             object: nil,
             queue: .main
         ) { [weak self] _ in
