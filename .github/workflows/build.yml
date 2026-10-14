@@ -58,8 +58,11 @@ jobs:
           set -euo pipefail
           APP="build/DerivedData-Device/Build/Products/Release-iphoneos/Gameshell.app"
           # ad-hoc 自签名（- 表示 ad-hoc），不需要证书
-          codesign --force --deep --sign - "$APP"
+          codesign --force --deep --sign - \
+            --entitlements Signing/Gameshell-iOS.entitlements \
+            "$APP"
           codesign --verify --verbose=2 "$APP"
+          codesign -d --entitlements :- "$APP"
 
       - name: Package IPA + tipa
         run: |
@@ -88,12 +91,21 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
+      # Apple Silicon 上未签名的 .app 会被 Gatekeeper 拦下（表现为「打不开」），
+      # 所以这里同样做 ad-hoc 自签名。
+      - name: Ad-hoc sign macOS app
+        run: |
+          set -euo pipefail
+          APP="build/DerivedData-macOS/Build/Products/Release/Gameshell.app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose=2 "$APP"
+
       - name: Upload macOS app
         uses: actions/upload-artifact@v4
         with:
           name: Gameshell-macOS
           path: build/DerivedData-macOS/Build/Products/Release/*.app
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4

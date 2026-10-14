@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  ad-hoc / TrollStore 侧载用的最小 entitlements。
+  正规开发者证书签名时不要用这份文件（那份由描述文件决定）。
+-->
+<dict>
+	<key>application-identifier</key>
+	<string>com.twoyears666.gameshell</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>com.twoyears666.gameshell</string>
+	</array>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>

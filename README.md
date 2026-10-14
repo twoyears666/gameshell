@@ -51,14 +51,24 @@ xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
 
 | 产物 | 内容 | 签名状态 |
 | --- | --- | --- |
-| `Gameshell-macOS` | macOS `.app` | 未签名 |
-| `Gameshell-IPA` | iOS 真机 `.ipa`（`Payload/Gameshell.app`） | **ad-hoc 自签名**，非开发者证书签名 |
+| `Gameshell-macOS` | macOS `.app` | **ad-hoc 自签名** |
+| `Gameshell-IPA` | iOS 真机 `.ipa`（`Payload/Gameshell.app`） | **ad-hoc 自签名 + 最小 entitlements**，非开发者证书签名 |
 | `Gameshell-TrollStore-tipa` | 与 IPA 内容相同的 `.tipa`，便于 TrollStore 识别 | 同上 |
 
-> ⚠️ **诚实说明**：CI 产出的 IPA / tipa 是 **未签名 + `codesign -s -` ad-hoc 自签名** 的包，
+> ⚠️ **诚实说明**：CI 产出的 IPA / tipa 是 **未签名 + `codesign -s -` ad-hoc 自签名** 的包
+> （entitlements 见 [Signing/Gameshell-iOS.entitlements](Signing/Gameshell-iOS.entitlements)），
 > 只能通过 **TrollStore（巨魔）** 或侧载工具安装 / 重签，
 > **不能**直接装到未越狱设备、也**不能**上架 App Store。
 > 正规签名的 IPA 需要 Apple 开发者证书与描述文件，属于**未完成**部分（见 [REFERENCE.md](REFERENCE.md)）。
+
+安装注意：
+
+- **系统要求 iOS / iPadOS 17.0 及以上**（`MinimumOSVersion` 由工程 `deploymentTarget` 决定）；低于此版本会装不上或启动即退。
+- macOS 上的 `.app` 是 ad-hoc 签名，从浏览器下载后带有 quarantine 标记，需要先执行：
+
+```bash
+xattr -dr com.apple.quarantine /path/to/Gameshell.app
+```
 
 ## URL 驱动
 
