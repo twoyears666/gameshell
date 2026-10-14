@@ -24,8 +24,8 @@ struct PlayerView: View {
                     WebView(url: url,
                             isLoading: $isLoading,
                             loadError: $loadError,
-                            onPointerActivity: { GSInputManager.shared.reportPointerActivity() },
-                            onKeyboardActivity: { GSInputManager.shared.reportKeyboardActivity() })
+                            onPointerActivity: { GSInputManager.shared().reportPointerActivity() },
+                            onKeyboardActivity: { GSInputManager.shared().reportKeyboardActivity() })
                 } else {
                     unavailable
                 }
@@ -135,7 +135,7 @@ struct PlayerView: View {
     }
 
     private var resolvedURL: URL? {
-        GSGameLauncher.normalizedGameURLFromString(game.gameURLString, baseURL: nil)
+        GSGameLauncher.normalizedGameURL(from: game.gameURLString, baseURL: nil)
     }
 }
 
@@ -171,11 +171,11 @@ private struct WebView: UIViewRepresentable {
         init(_ parent: WebView) { self.parent = parent }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            DispatchQueue.main.async { parent.isLoading = true; parent.loadError = nil }
+            DispatchQueue.main.async { self.parent.isLoading = true; self.parent.loadError = nil }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            DispatchQueue.main.async { parent.isLoading = false }
+            DispatchQueue.main.async { self.parent.isLoading = false }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -219,11 +219,11 @@ private struct WebView: NSViewRepresentable {
         init(_ parent: WebView) { self.parent = parent }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            DispatchQueue.main.async { parent.isLoading = true; parent.loadError = nil }
+            DispatchQueue.main.async { self.parent.isLoading = true; self.parent.loadError = nil }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            DispatchQueue.main.async { parent.isLoading = false }
+            DispatchQueue.main.async { self.parent.isLoading = false }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

@@ -99,7 +99,7 @@ final class AppState: ObservableObject {
 
     /// URL 驱动启动：把游戏的 url 交给播放器
     func launch(_ game: GSGame) {
-        guard let url = GSGameLauncher.normalizedGameURLFromString(game.gameURLString, baseURL: nil) else {
+        guard let url = GSGameLauncher.normalizedGameURL(from: game.gameURLString, baseURL: nil) else {
             showToast("该游戏没有可用的启动 URL")
             return
         }
@@ -124,7 +124,7 @@ final class AppState: ObservableObject {
         switch action {
         case .open:
             if let raw = params["url"],
-               let resolved = GSGameLauncher.normalizedGameURLFromString(raw, baseURL: nil) {
+               let resolved = GSGameLauncher.normalizedGameURL(from: raw, baseURL: nil) {
                 startAdHoc(url: resolved, title: params["name"] ?? resolved.host ?? "游戏")
             } else {
                 showToast("深链缺少 url 参数")
@@ -198,7 +198,7 @@ final class AppState: ObservableObject {
     // MARK: - 外设
 
     private func observeInput() {
-        let manager = GSInputManager.shared
+        let manager = GSInputManager.shared()
         manager.startMonitoring()
         self.inputSummary = manager.snapshot.summaryText()
 
