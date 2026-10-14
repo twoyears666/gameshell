@@ -1,7 +1,6 @@
 {
-  "_comment": "本 App 不内置任何游戏，清单默认为空，请自行添加。url 支持 http(s) 网页，也支持 steam:// 这类唤起本机 App 的链接。字段说明见 README.md。",
+  "_comment": "本 App 不内置任何游戏，清单默认为空。请在 App 内点「添加」填名称和 URL（http(s) 用内置浏览器打开，steam:// 这类交给系统唤起对应 App）。同一字段也可直接写在这份内置清单里（内置清单只作兜底）。",
   "title": "Gameshell",
-  "subtitle": "URL 驱动的游戏启动器",
-  "categories": ["全部"],
+  "subtitle": "URL 驱动的启动器",
   "games": []
 }

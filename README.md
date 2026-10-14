@@ -1,14 +1,16 @@
 # Gameshell
 
-一个 **iOS / iPadOS / macOS** 的游戏启动器 **UI 壳**（shell）。
-界面风格参考 **盖世游戏 / GameHub**，但**不使用其任何代码或资源**，仅参照「布局结构与视觉语言」。
+一个 **iOS / iPadOS / macOS** 的 URL 启动器 **UI 壳**（shell）。
+界面风格参考 **盖世游戏 / GameHub**、第一排方块行参考 **PS5 首页**，但**不使用其任何代码或资源**，仅参照「布局结构与视觉语言」。
 本仓库目前是壳：功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
 
+- **只有一个界面**：主界面（顶栏 + 第一排方块行），没有游戏库 / 榜单 / 我的等其它页面
 - **技术栈**：Swift（SwiftUI，UI 层）+ Objective-C（核心层）混合
-- **游戏来源**：完全 **URL 驱动** —— 打开一个 URL 就等于启动 / 打开一个游戏或 App；
+- **游戏来源**：完全 **URL 驱动** —— 打开一个 URL 就等于打开一个游戏或 App；
   `http(s)` 用内置 WebView 打开，`steam://` 这类 scheme 交给系统**唤起对应 App**
-- **不内置任何游戏**：`Resources/games.json` 默认为空，所有条目都由你自己添加
-- **首页第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
+- **App 内添加 URL**：主界面右上角「添加」，填名称 + URL 即可，写入沙盒后重启仍在（基础功能）
+- **不内置任何游戏**：清单默认为空，所有条目都由你自己添加
+- **第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
 - **输入**：支持 **手柄**（GameController 框架，热插拔）与 **键鼠**
 - **构建**：GitHub Actions CI（macOS runner：XcodeGen + xcodebuild）
 - **主题**：所有颜色 / 圆角 / 间距 / 字号集中在 `Theme.swift`，便于后续做主题包
@@ -75,42 +77,44 @@ xattr -dr com.apple.quarantine /path/to/Gameshell.app
 
 ## URL 驱动
 
-游戏列表来自 `Resources/games.json`，**UI 不硬编码任何游戏**，且**清单默认是空的**——本 App 不内置任何游戏，所有条目都由你自己添加。每条目至少需要这几个字段：
+打开一个 URL = 打开一个游戏 / App。**App 内添加（基础功能）**：主界面右上角「添加」→ 填名称和 URL → 保存。
+
+- 条目写入沙盒 `Documents/games.json`，下次启动优先读这份；内置的 `Resources/games.json` 只是**空的兜底清单**。
+- **长按方块卡片**可以删除条目（自绘确认浮层，不用系统弹窗）。
+- 单条记录的字段（见 `GSGame`）：
 
 ```json
 {
-  "id": "my-game",
-  "name": "我的游戏",
-  "icon": "gamecontroller.fill",
+  "id": "唯一 id",
+  "name": "显示名称",
   "url": "https://example.com/game",
-  "platform": "Web",
-  "controllerSupport": false,
-  "rating": 8.6,
-  "description": "……",
-  "tags": ["益智", "数字"]
+  "platform": "网页",
+  "icon": "gamecontroller.fill",
+  "controllerSupport": false
 }
 ```
 
-- `icon`：以 `http` 开头按远程图片加载，否则按 SF Symbol 名称渲染。
-- `url`：这是 URL 驱动的核心。
+- `url`：URL 驱动的核心。
   - `http(s)` → 由内置 WebView 打开（网页 / 网页游戏）。
   - 其它 scheme → 交给系统打开，用于**唤起本机 App**，例如 `steam://`、`minecraft://`、`youtube://`。
+  - 在 App 内添加时如果没写 scheme，会自动补 `https://`。
+- `icon`：以 `http` 开头按远程图片加载，否则按 SF Symbol 名渲染。
+- `rating` / `description` / `tags`：能被解析入库，但**当前 UI 没有展示**（详见 REFERENCE 的未完成清单）。
 
 ### 深链（URL scheme：`gameshell://`）
 
 | 深链 | 作用 |
 | --- | --- |
-| `gameshell://home` | 回到首页 |
-| `gameshell://open?url=https://example.com/game&name=示例` | 用 URL 直接开一个不在清单里的游戏 |
+| `gameshell://open?url=https://example.com/game&name=示例` | 用 URL 直接开一个不在清单里的条目 |
 | `gameshell://open?url=steam://run/123` | URL 是 `steam://` 这类时，交给系统唤起对应 App |
-| `gameshell://play?id=<清单里的 id>` | 按 id 在清单里找到并启动 |
-| `gameshell://search?q=tetris` | 跳转游戏库并带上搜索词 |
+| `gameshell://play?id=<清单里的 id>` | 按 id 在清单里找到并打开 |
+| `gameshell://home` | 关闭播放器，回到主界面 |
 
 命令行验证：
 
 ```bash
 # macOS
-open "gameshell://search?q=tetris"
+open "gameshell://open?url=https://example.com&name=示例"
 ```
 
 ## 目录结构
@@ -119,30 +123,31 @@ open "gameshell://search?q=tetris"
 Sources/
 ├── App/                    # Swift：入口与全局状态
 │   ├── GameshellApp.swift  # @main，注册 gameshell:// scheme
-│   └── AppState.swift      # 清单、导航、浮层、外设状态
+│   └── AppState.swift      # 清单增删/持久化、URL 启动、浮层、外设状态
 ├── Core/                   # Objective-C：核心逻辑
-│   ├── GSGameManifest.h/.m # games.json 解析 → 游戏模型
+│   ├── GSGameManifest.h/.m # 清单解析 + 增删 + 沙盒持久化
 │   ├── GSGameLauncher.h/.m # 深链解析 / URL 规整
 │   ├── GSInputManager.h/.m # 手柄（GCController）+ 键鼠在线探测
 │   └── Gameshell-Bridging-Header.h
 └── UI/                     # Swift：SwiftUI 界面
-    ├── Theme.swift         # 设计令牌（颜色/圆角/间距/字号/断点）
-    ├── Components/         # 卡片、评分徽章、搜索框、标签栏……
-    ├── Screens/            # 首页 / 游戏库 / 榜单 / 我的 / 详情 / 播放器
-    └── Overlay/            # 自绘浮层（禁系统弹窗）
+    ├── Theme.swift         # 设计令牌（颜色/圆角/间距/字号/尺寸）
+    ├── Components/         # 顶栏、方块卡片（PS5 风格）、封面
+    ├── Screens/            # 主界面 / 播放器（WebView）
+    └── Overlay/            # 自绘浮层 + App 内添加 URL 表单（禁系统弹窗）
 Resources/
-├── games.json              # 游戏清单（唯一数据源）
+├── games.json              # 内置兜底清单（默认为空）
 └── Assets.xcassets
+
+用户数据：沙盒 Documents/games.json（App 内添加的条目）
 ```
 
 ## 设计约束
 
-- **禁止系统弹窗**：不使用 `UIAlertController` / `NSAlert` / `NSPanel`，所有提示与确认走自绘浮层（`CustomOverlayLayer`）。
+- **禁止系统弹窗**：不使用 `UIAlertController` / `NSAlert` / `NSPanel`，所有提示、确认、输入表单都走自绘浮层。
 - **深色主题**：近黑背景 + `#1B1B20` 卡片 + 橙色 `#FF7A18` 强调色，卡片带 `#2A2A30` 细描边。
-- **响应式**：竖屏单列；iPad / macOS 多列 Bento 网格；横屏双列。
 - **令牌集中**：任何视图都不硬编码颜色尺寸，一律引用 `Theme.*`。
 
 ## 状态
 
-壳（UI + URL 驱动 + 手柄键鼠探测 + CI）已经可用，业务功能仍在补。
+主界面（PS5 风格方块行 + App 内添加 URL + 沙盒持久化 + URL 启动 + 手柄键鼠探测 + CI）已经可用，业务功能仍在补。
 逐项完成度请看 [REFERENCE.md](REFERENCE.md) 的「未完成清单」。
