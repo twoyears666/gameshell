@@ -11,7 +11,9 @@ struct SearchField: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.Color.textSecondary)
 
-            TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(Theme.Color.textTertiary))
+            // 注意：prompt 要求的是 Text，而 Text.foregroundStyle 需要 iOS 17+，
+            // 这里用 Text.foregroundColor（iOS 13+，软弃用不报警告）保持 iOS 16 可用。
+            TextField("", text: $text, prompt: Text(placeholder).foregroundColor(Theme.Color.textTertiary))
                 .textFieldStyle(.plain)
                 .font(Theme.Font.body)
                 .foregroundStyle(Theme.Color.textPrimary)
