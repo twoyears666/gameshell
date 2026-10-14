@@ -5,7 +5,10 @@
 本仓库目前是壳：功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
 
 - **技术栈**：Swift（SwiftUI，UI 层）+ Objective-C（核心层）混合
-- **游戏来源**：完全 **URL 驱动** —— 打开一个 URL 就等于启动 / 打开一个游戏或 App
+- **游戏来源**：完全 **URL 驱动** —— 打开一个 URL 就等于启动 / 打开一个游戏或 App；
+  `http(s)` 用内置 WebView 打开，`steam://` 这类 scheme 交给系统**唤起对应 App**
+- **不内置任何游戏**：`Resources/games.json` 默认为空，所有条目都由你自己添加
+- **首页第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
 - **输入**：支持 **手柄**（GameController 框架，热插拔）与 **键鼠**
 - **构建**：GitHub Actions CI（macOS runner：XcodeGen + xcodebuild）
 - **主题**：所有颜色 / 圆角 / 间距 / 字号集中在 `Theme.swift`，便于后续做主题包
@@ -72,15 +75,15 @@ xattr -dr com.apple.quarantine /path/to/Gameshell.app
 
 ## URL 驱动
 
-游戏列表来自 `Resources/games.json`，**UI 不硬编码任何游戏**。每条目至少有：
+游戏列表来自 `Resources/games.json`，**UI 不硬编码任何游戏**，且**清单默认是空的**——本 App 不内置任何游戏，所有条目都由你自己添加。每条目至少需要这几个字段：
 
 ```json
 {
-  "id": "2048",
-  "name": "2048",
-  "icon": "square.grid.3x3.fill",
-  "url": "https://play2048.co/",
-  "platform": "休闲",
+  "id": "my-game",
+  "name": "我的游戏",
+  "icon": "gamecontroller.fill",
+  "url": "https://example.com/game",
+  "platform": "Web",
   "controllerSupport": false,
   "rating": 8.6,
   "description": "……",
@@ -89,7 +92,9 @@ xattr -dr com.apple.quarantine /path/to/Gameshell.app
 ```
 
 - `icon`：以 `http` 开头按远程图片加载，否则按 SF Symbol 名称渲染。
-- `url`：`http(s)` 由内置 WebView 加载；其它 scheme 交给系统打开。
+- `url`：这是 URL 驱动的核心。
+  - `http(s)` → 由内置 WebView 打开（网页 / 网页游戏）。
+  - 其它 scheme → 交给系统打开，用于**唤起本机 App**，例如 `steam://`、`minecraft://`、`youtube://`。
 
 ### 深链（URL scheme：`gameshell://`）
 
@@ -97,14 +102,15 @@ xattr -dr com.apple.quarantine /path/to/Gameshell.app
 | --- | --- |
 | `gameshell://home` | 回到首页 |
 | `gameshell://open?url=https://example.com/game&name=示例` | 用 URL 直接开一个不在清单里的游戏 |
-| `gameshell://play?id=2048` | 按 id 在清单里找到并启动 |
+| `gameshell://open?url=steam://run/123` | URL 是 `steam://` 这类时，交给系统唤起对应 App |
+| `gameshell://play?id=<清单里的 id>` | 按 id 在清单里找到并启动 |
 | `gameshell://search?q=tetris` | 跳转游戏库并带上搜索词 |
 
 命令行验证：
 
 ```bash
 # macOS
-open "gameshell://play?id=2048"
+open "gameshell://search?q=tetris"
 ```
 
 ## 目录结构

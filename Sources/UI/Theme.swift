@@ -72,6 +72,14 @@ enum Theme {
         static let pill: CGFloat = 999
     }
 
+    // MARK: - 尺寸
+
+    enum Size {
+        /// 首页第一排（PS5 风格）方块卡片的边长
+        static let squareTile: CGFloat = 150
+        static let squareTileWide: CGFloat = 190
+    }
+
     // MARK: - 间距
 
     enum Spacing {

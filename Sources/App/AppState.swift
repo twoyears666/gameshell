@@ -2,6 +2,12 @@ import SwiftUI
 import Foundation
 import Combine
 
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
 /// 底部标签
 enum AppTab: String, CaseIterable, Identifiable {
     case home = "首页"
@@ -97,7 +103,7 @@ final class AppState: ObservableObject {
         presentedGame = nil
     }
 
-    /// URL 驱动启动：把游戏的 url 交给播放器
+    /// URL 驱动启动：http(s) 交给内置 WebView，其它 scheme 交给系统唤起对应 App。
     func launch(_ game: GSGame) {
         guard let url = GSGameLauncher.normalizedGameURL(from: game.gameURLString, baseURL: nil) else {
             showToast("该游戏没有可用的启动 URL")
@@ -106,9 +112,24 @@ final class AppState: ObservableObject {
         if url.scheme == "http" || url.scheme == "https" {
             playingGame = game
         } else {
-            // 非 http(s) 的自定义 scheme 交给系统
-            showToast("已请求系统打开 \(url.scheme ?? ""):// 链接")
+            openExternally(url)
         }
+    }
+
+    /// 把非 http(s) 的链接（如 steam://、minecraft://）交给系统打开，由系统唤起对应 App。
+    /// 注意：iOS 上能否打开取决于目标 App 是否已安装，这里如实把失败结果提示出来。
+    private func openExternally(_ url: URL) {
+        #if os(iOS)
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            if !success {
+                self?.showToast("系统打不开 \(url.scheme ?? "")://，对应 App 可能未安装")
+            }
+        }
+        #elseif os(macOS)
+        if !NSWorkspace.shared.open(url) {
+            showToast("系统打不开 \(url.scheme ?? "")://，对应 App 可能未安装")
+        }
+        #endif
     }
 
     func stopPlaying() {
@@ -148,8 +169,9 @@ final class AppState: ObservableObject {
 
     /// 打开一个不在清单里的临时 URL（深链直接给 URL 的场景）
     private func startAdHoc(url: URL, title: String) {
-        guard url.scheme == "http" || url.scheme == "https" else {
-            showToast("仅支持 http(s) 的临时链接")
+        if url.scheme != "http" && url.scheme != "https" {
+            // 非网页链接：直接交给系统唤起对应 App
+            openExternally(url)
             return
         }
         let adHoc = GSGame(dictionary: [

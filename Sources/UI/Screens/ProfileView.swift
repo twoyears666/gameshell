@@ -22,9 +22,10 @@ struct ProfileView: View {
                         state.selectedTab = .home
                         state.showToast("已回到首页")
                     }
-                    SettingRow(systemImage: "doc.text.magnifyingglass", title: "示例：打开 2048") {
-                        guard let game = state.games.first(where: { $0.identifier == "2048" }) else { return }
-                        state.launch(game)
+                    SettingRow(systemImage: "plus.app",
+                               title: "添加游戏",
+                               detail: state.games.isEmpty ? "清单为空" : "共 \(state.games.count) 款") {
+                        state.showToast("编辑 Resources/games.json 添加，或用 gameshell://open?url=… 深链打开")
                     }
                 }
 
@@ -34,6 +35,8 @@ struct ProfileView: View {
                     SettingRow(systemImage: "arrow.down.circle", title: "游戏下载 / 安装", detail: "未完成")
                     SettingRow(systemImage: "cpu", title: "本地模拟器内核", detail: "未完成")
                     SettingRow(systemImage: "gamecontroller.badge.xmark", title: "手柄按键映射到网页", detail: "未完成")
+                    SettingRow(systemImage: "rectangle.on.rectangle.slash", title: "首页方块行的手柄焦点导航", detail: "未完成（当前只有指针悬停聚焦）")
+                    SettingRow(systemImage: "square.and.pencil", title: "图形化添加游戏", detail: "未完成（当前编辑 games.json / 深链）")
                 }
 
                 group(title: "关于") {

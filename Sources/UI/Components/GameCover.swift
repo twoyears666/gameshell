@@ -6,6 +6,7 @@ import SwiftUI
 struct GameCover: View {
     let game: GSGame
     var symbolScale: CGFloat = 0.42
+    var cornerRadius: CGFloat = Theme.Radius.card
 
     var body: some View {
         GeometryReader { geo in
@@ -18,9 +19,9 @@ struct GameCover: View {
 
                 content(in: geo.size)
             }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(Theme.Color.border, lineWidth: 1)
             )
         }
