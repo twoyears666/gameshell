@@ -85,11 +85,11 @@ NSNotificationName const GSInputManagerDidUpdateNotification = @"GSInputManagerD
 #if TARGET_OS_IPHONE || TARGET_OS_MACCATALYST
     [center addObserver: self
                selector: @selector(handleControllerListChanged)
-                   name: UIKeyboardDidConnectNotification
+                   name: GCKeyboardDidConnectNotification
                  object: nil];
     [center addObserver: self
                selector: @selector(handleControllerListChanged)
-                   name: UIKeyboardDidDisconnectNotification
+                   name: GCKeyboardDidDisconnectNotification
                  object: nil];
 #endif
 
@@ -144,6 +144,10 @@ NSNotificationName const GSInputManagerDidUpdateNotification = @"GSInputManagerD
             self.snapshot.pointerConnected = YES;
         }
     }
+#else
+    // macOS 自带键盘与鼠标 / 触控板，视为始终可用
+    self.snapshot.keyboardConnected = YES;
+    self.snapshot.pointerConnected = YES;
 #endif
 
     self.snapshot.hardwareInputAvailable =
