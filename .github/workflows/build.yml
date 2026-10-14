@@ -35,22 +35,6 @@ jobs:
       - name: Show available SDKs
         run: xcodebuild -showsdks
 
-      # ---------- iOS / iPadOS ----------
-      - name: Build iOS (Simulator)
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project Gameshell.xcodeproj \
-            -scheme Gameshell \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/DerivedData-iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
-
       # ---------- iOS 真机（用于打包 IPA / tipa） ----------
       # 说明：这里产出的是「未签名 + ad-hoc 自签名」包，供 TrollStore / 侧载工具使用。
       # 正规签名的 IPA 需要 Apple 开发者证书与描述文件（当前未完成，见 REFERENCE.md）。
@@ -103,13 +87,6 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build
-
-      - name: Upload iOS Simulator app
-        uses: actions/upload-artifact@v4
-        with:
-          name: Gameshell-iOS-Simulator
-          path: build/DerivedData-iOS/Build/Products/Release-iphonesimulator/*.app
-          if-no-files-found: warn
 
       - name: Upload macOS app
         uses: actions/upload-artifact@v4

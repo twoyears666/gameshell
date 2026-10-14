@@ -42,7 +42,7 @@
 | 自绘浮层（toast / confirm），**不使用系统弹窗** | ✅ 已实现 | `Sources/UI/Overlay/` |
 | 手柄在线探测与热插拔（GameController） | ✅ 已实现 | `GSInputManager.m` |
 | 键鼠在线探测（GCKeyboard / GCMouse，iOS 14+） | ✅ 已实现 | `GSInputManager.m` |
-| GitHub Actions CI（iOS 模拟器 + iOS 真机 + macOS 编译） | ✅ 已实现 | `.github/workflows/build.yml` |
+| GitHub Actions CI（iOS 真机 + macOS 编译） | ✅ 已实现 | `.github/workflows/build.yml` |
 | IPA 打包（`Payload/Gameshell.app` → `.ipa`） | ✅ 已实现（**ad-hoc 自签名**，非开发者证书签名） | `.github/workflows/build.yml` |
 | TrollStore 用的 `.tipa` | ✅ 已实现（内容与 IPA 相同，仅后缀不同） | `.github/workflows/build.yml` |
 

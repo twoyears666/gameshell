@@ -51,7 +51,6 @@ xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
 
 | 产物 | 内容 | 签名状态 |
 | --- | --- | --- |
-| `Gameshell-iOS-Simulator` | iOS 模拟器 `.app` | 无需签名 |
 | `Gameshell-macOS` | macOS `.app` | 未签名 |
 | `Gameshell-IPA` | iOS 真机 `.ipa`（`Payload/Gameshell.app`） | **ad-hoc 自签名**，非开发者证书签名 |
 | `Gameshell-TrollStore-tipa` | 与 IPA 内容相同的 `.tipa`，便于 TrollStore 识别 | 同上 |
