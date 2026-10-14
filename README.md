@@ -33,11 +33,33 @@ xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
   -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
 
+# iOS 真机（用于打包 IPA）
+xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
+  -configuration Release -sdk iphoneos \
+  -destination 'generic/platform=iOS' \
+  CODE_SIGNING_ALLOWED=NO build
+
 # macOS
 xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
   -configuration Release -destination 'generic/platform=macOS' \
   CODE_SIGNING_ALLOWED=NO build
 ```
+
+## CI 产物
+
+每次推送到 `main`，[.github/workflows/build.yml](.github/workflows/build.yml) 会在 `macos-15` 上跑完整流程并上传：
+
+| 产物 | 内容 | 签名状态 |
+| --- | --- | --- |
+| `Gameshell-iOS-Simulator` | iOS 模拟器 `.app` | 无需签名 |
+| `Gameshell-macOS` | macOS `.app` | 未签名 |
+| `Gameshell-IPA` | iOS 真机 `.ipa`（`Payload/Gameshell.app`） | **ad-hoc 自签名**，非开发者证书签名 |
+| `Gameshell-TrollStore-tipa` | 与 IPA 内容相同的 `.tipa`，便于 TrollStore 识别 | 同上 |
+
+> ⚠️ **诚实说明**：CI 产出的 IPA / tipa 是 **未签名 + `codesign -s -` ad-hoc 自签名** 的包，
+> 只能通过 **TrollStore（巨魔）** 或侧载工具安装 / 重签，
+> **不能**直接装到未越狱设备、也**不能**上架 App Store。
+> 正规签名的 IPA 需要 Apple 开发者证书与描述文件，属于**未完成**部分（见 [REFERENCE.md](REFERENCE.md)）。
 
 ## URL 驱动
 

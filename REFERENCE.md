@@ -42,7 +42,9 @@
 | 自绘浮层（toast / confirm），**不使用系统弹窗** | ✅ 已实现 | `Sources/UI/Overlay/` |
 | 手柄在线探测与热插拔（GameController） | ✅ 已实现 | `GSInputManager.m` |
 | 键鼠在线探测（GCKeyboard / GCMouse，iOS 14+） | ✅ 已实现 | `GSInputManager.m` |
-| GitHub Actions CI（iOS 模拟器 + macOS 编译） | ✅ 已实现 | `.github/workflows/build.yml` |
+| GitHub Actions CI（iOS 模拟器 + iOS 真机 + macOS 编译） | ✅ 已实现 | `.github/workflows/build.yml` |
+| IPA 打包（`Payload/Gameshell.app` → `.ipa`） | ✅ 已实现（**ad-hoc 自签名**，非开发者证书签名） | `.github/workflows/build.yml` |
+| TrollStore 用的 `.tipa` | ✅ 已实现（内容与 IPA 相同，仅后缀不同） | `.github/workflows/build.yml` |
 
 ---
 
@@ -66,7 +68,8 @@
 | 主题包（自定义布局 / 配色 / 文本的可替换包） | **未完成**（当前仅把令牌集中，尚未做包加载） |
 | 应用图标（`AppIcon` 资源为空） | **未完成** |
 | 单元测试 | **未完成** |
-| 真机签名与分发（CI 使用 `CODE_SIGNING_ALLOWED=NO` 仅验证编译） | **未完成** |
+| 正规签名的 IPA（Apple 开发者证书 + 描述文件，可直接装到未越狱设备） | **未完成**（CI 目前只产出 ad-hoc 自签名的 IPA / tipa，仅 TrollStore / 侧载工具可用） |
+| App Store / TestFlight 分发 | **未完成** |
 
 ### 关于清单中的示例条目
 

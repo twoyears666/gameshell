@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build (iOS + macOS)
+    name: Build (iOS + macOS + IPA)
     runs-on: macos-15
     timeout-minutes: 45
 
@@ -51,6 +51,44 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
+      # ---------- iOS 真机（用于打包 IPA / tipa） ----------
+      # 说明：这里产出的是「未签名 + ad-hoc 自签名」包，供 TrollStore / 侧载工具使用。
+      # 正规签名的 IPA 需要 Apple 开发者证书与描述文件（当前未完成，见 REFERENCE.md）。
+      - name: Build iOS (Device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Gameshell.xcodeproj \
+            -scheme Gameshell \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData-Device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Ad-hoc sign app
+        run: |
+          set -euo pipefail
+          APP="build/DerivedData-Device/Build/Products/Release-iphoneos/Gameshell.app"
+          # ad-hoc 自签名（- 表示 ad-hoc），不需要证书
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose=2 "$APP"
+
+      - name: Package IPA + tipa
+        run: |
+          set -euo pipefail
+          APP="build/DerivedData-Device/Build/Products/Release-iphoneos/Gameshell.app"
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          ( cd build && zip -qry Gameshell.ipa Payload )
+          # tipa 与 ipa 内容一致，仅后缀不同，便于 TrollStore 识别
+          cp build/Gameshell.ipa build/Gameshell.tipa
+          ls -lh build/Gameshell.ipa build/Gameshell.tipa
+
       # ---------- macOS ----------
       - name: Build macOS
         run: |
@@ -79,3 +117,17 @@ jobs:
           name: Gameshell-macOS
           path: build/DerivedData-macOS/Build/Products/Release/*.app
           if-no-files-found: warn
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gameshell-IPA
+          path: build/Gameshell.ipa
+          if-no-files-found: error
+
+      - name: Upload TrollStore tipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gameshell-TrollStore-tipa
+          path: build/Gameshell.tipa
+          if-no-files-found: error
