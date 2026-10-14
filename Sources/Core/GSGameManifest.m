@@ -129,7 +129,7 @@
 
 #pragma mark - 增删
 
-- (void)addGame:(GSGame *)game {
+- (void)add:(GSGame *)game {
     if (game == nil) {
         return;
     }
