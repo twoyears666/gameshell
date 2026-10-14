@@ -66,7 +66,7 @@ struct GameCard: View {
             .animation(Theme.Motion.quick, value: isHovering)
         }
         .buttonStyle(.plain)
-        .onHover { hovering in isHovering = hovering }
+        .onHoverIfSupported { hovering in isHovering = hovering }
     }
 }
 
@@ -115,7 +115,7 @@ struct GameRow: View {
             )
         }
         .buttonStyle(.plain)
-        .onHover { hovering in isHovering = hovering }
+        .onHoverIfSupported { hovering in isHovering = hovering }
     }
 }
 
@@ -170,6 +170,18 @@ struct SettingRow: View {
         }
         .buttonStyle(.plain)
         .disabled(onTap == nil)
-        .onHover { hovering in isHovering = hovering }
+        .onHoverIfSupported { hovering in isHovering = hovering }
+    }
+}
+
+/// `onHover` 在 iOS 上要 16.4+（只有 iPadOS 接指针时才有意义），低版本直接跳过。
+private extension View {
+    @ViewBuilder
+    func onHoverIfSupported(_ action: @escaping (Bool) -> Void) -> some View {
+        if #available(iOS 16.4, macOS 10.15, *) {
+            self.onHover(perform: action)
+        } else {
+            self
+        }
     }
 }

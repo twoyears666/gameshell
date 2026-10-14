@@ -63,7 +63,7 @@ xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
 
 安装注意：
 
-- **系统要求 iOS / iPadOS 17.0 及以上**（`MinimumOSVersion` 由工程 `deploymentTarget` 决定）；低于此版本会装不上或启动即退。
+- **系统要求 iOS / iPadOS 16.0 及以上**（`MinimumOSVersion` 由工程 `deploymentTarget` 决定）；低于此版本会装不上或启动即退。
 - macOS 上的 `.app` 是 ad-hoc 签名，从浏览器下载后带有 quarantine 标记，需要先执行：
 
 ```bash
