@@ -53,9 +53,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 // MARK: - 增删与持久化（App 内添加 URL 的基础能力）
 
-- (void)addGame:(GSGame *)game;
+- (void)addGame:(GSGame *)game NS_SWIFT_NAME(add(_:));
 
-- (void)removeGameWithIdentifier:(NSString *)identifier;
+- (void)removeGameWithIdentifier:(NSString *)identifier
+    NS_SWIFT_NAME(removeGame(withIdentifier:));
 
 /// 把当前清单写入沙盒 Documents/games.json，返回是否成功
 - (BOOL)persistToUserStore;
