@@ -53,7 +53,7 @@ write_header() {
 
 #endif
 EOF
-	log "写出 $HEADER（GS_HAVE_MGBA=$have）"
+	log "写出 ${HEADER}（GS_HAVE_MGBA=${have}）"
 }
 
 # 造一个空壳静态库，让 -lmgba 一定能找到文件（没核心时不会有符号被引用）。
@@ -81,7 +81,7 @@ STUB
 		if xcrun ar rcs "$LIB" "$stub_obj" 2>/dev/null || ar rcs "$LIB" "$stub_obj" 2>/dev/null; then
 			log "生成空壳静态库 $LIB"
 		else
-			log "警告：无法生成空壳静态库 $LIB（-lmgba 可能找不到文件）"
+			log "警告：无法生成空壳静态库 ${LIB}（-lmgba 可能找不到文件）"
 		fi
 	else
 		log "警告：空壳目标文件编译失败，见 $tmpdir/cc.log"
@@ -93,7 +93,7 @@ STUB
 # 桌面端保持纯 URL 模式：模拟器相关 UI 在 Swift 侧是 #if os(iOS) 门禁的，
 # macOS 不编译也不链接任何核心，省掉一整条交叉编译风险。
 if [ "$PLATFORM" = "macosx" ]; then
-	log "平台 $PLATFORM：按设计不接入模拟器核心（保持 URL-only）"
+	log "平台 ${PLATFORM}：按设计不接入模拟器核心（保持 URL-only）"
 	make_stub_library
 	write_header 0 "macOS 不接入模拟器核心（仅 URL 模式）"
 	exit 0
@@ -121,15 +121,15 @@ case "$PLATFORM" in
 		;;
 	iphonesimulator)
 		# 模拟器构建产物按约定不交付（见 README），这里也顺手跳过省时间
-		log "平台 $PLATFORM：按约定不交付模拟器产物，跳过核心编译"
+		log "平台 ${PLATFORM}：按约定不交付模拟器产物，跳过核心编译"
 		make_stub_library
 		write_header 0 "模拟器构建不交付核心"
 		exit 0
 		;;
 	*)
-		log "未知平台 $PLATFORM，按不接入核心处理"
+		log "未知平台 ${PLATFORM}，按不接入核心处理"
 		make_stub_library
-		write_header 0 "未知平台 $PLATFORM"
+		write_header 0 "未知平台 ${PLATFORM}"
 		exit 0
 		;;
 esac
@@ -165,6 +165,19 @@ log "平台=$PLATFORM SDK=$SDK_PATH"
 #   ENABLE_DEBUGGERS=OFF          ⇒ 库里没有 ENABLE_DEBUGGERS 宏；
 #   ENABLE_VFS 强制 ON（第 356 行）⇒ 库里必然同时有 ENABLE_VFS 与 ENABLE_DIRECTORIES。
 #   这几个宏决定 struct mCore 的成员布局，两边必须一致，否则 ABI 不一致会读错内存。
+#
+# HAVE_POPCOUNT32=0 / HAVE_CRC32=0：必须显式预置，否则 check_function_exists 会假阳性。
+#   原因：上面为了「交叉编译时不真的链接」传了 CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY，
+#   这会让 cmake 的 check_function_exists 只编译、不链接 —— 「函数是否存在于 libc」于是永远
+#   返回 found。而 Apple libc 里这两个函数是真的没有：
+#     · popcount32  → include/mgba-util/math.h 的 inline 回退被 #ifndef HAVE_POPCOUNT32 跳过
+#                     ⇒ src/gba/gba.c:476 直接编译报 "call to undeclared function"；
+#     · crc32       → src/util/crc32.c 自带实现在 #ifndef HAVE_CRC32 里，被跳过 ⇒ .a 里没有
+#                     crc32 符号；USE_ZLIB 又是 OFF（DISABLE_DEPS），zlib 也不会补上它，
+#                     ⇒ Xcode 链接期报 _crc32 undefined。
+#   预置成 0（非空且 falsy）可同时骗过 CheckFunctionExists 的两条分支
+#   （`NOT DEFINED VAR` 与 `VAR STREQUAL ""` 都不会命中），于是它不再去 try_compile，
+#   且 flags.h 里的 #cmakedefine HAVE_* 也会被写成 /* #undef */。
 cmake -S "$MGBA_DIR" -B "$MGBA_BUILD_DIR" \
 	-DCMAKE_SYSTEM_NAME=iOS \
 	-DCMAKE_OSX_SYSROOT="$SDK_NAME" \
@@ -173,6 +186,8 @@ cmake -S "$MGBA_DIR" -B "$MGBA_BUILD_DIR" \
 	-DCMAKE_C_COMPILER="$CC" \
 	-DCMAKE_C_COMPILER_WORKS=1 \
 	-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+	-DHAVE_POPCOUNT32=0 \
+	-DHAVE_CRC32=0 \
 	-DCMAKE_BUILD_TYPE=MinSizeRel \
 	-DBINARY_NAME=mgba \
 	-DLIBMGBA_ONLY=ON \
@@ -212,7 +227,7 @@ fi
 cp "$BUILT_LIB" "$LIB"
 have_mgba=1
 summary="mGBA 已接入（GBA / GB / GBC）"
-log "完成：$LIB（$(du -h "$LIB" | cut -f1)）"
+log "完成：${LIB}（$(du -h "$LIB" | cut -f1)）"
 
 write_header "$have_mgba" "$summary"
 exit 0

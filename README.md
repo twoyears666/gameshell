@@ -2,7 +2,8 @@
 
 一个 **iOS / iPadOS / macOS** 的 URL 启动器 **UI 壳**（shell）。
 界面风格参考 **盖世游戏 / GameHub**、第一排方块行参考 **PS5 首页**，但**不使用其任何代码或资源**，仅参照「布局结构与视觉语言」。
-本仓库目前是壳：功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
+本仓库以「壳 + 启动通路」为主；模拟器部分**已接入 mGBA**（GBA / GB / GBC），其余系统**尚未接入**。
+功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
 
 - **只有一个界面**：主界面（顶栏 + 第一排方块行），没有游戏库 / 榜单 / 我的等其它页面
 - **技术栈**：Swift（SwiftUI，UI 层）+ Objective-C（核心层）混合
@@ -10,6 +11,10 @@
   `http(s)` 用内置 WebView 打开，`steam://` 这类 scheme 交给系统**唤起对应 App**
 - **App 内添加 URL**：主界面右上角「添加」，填名称 + URL 即可，写入沙盒后重启仍在（基础功能）
 - **不内置任何游戏**：清单默认为空，所有条目都由你自己添加
+- **模拟器 ROM 导入与模拟**：主界面「模拟器 ROM」分区，导入 ROM 后点开卡片即用内置核心模拟；
+  **不内置任何 ROM**，全部由你自己导入（App 内导入，或从「文件」App 拷进 `Documents/ROMs/<系统>/`）
+- **已接入的核心**：**mGBA**（GBA / GB / GBC）；NES / SNES / NDS / 3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
+- **虚拟手柄**：操控界面自绘（布局参照 Delta / manic emu），**不借鉴 RetroArch 的触屏 UI**
 - **第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
 - **输入**：支持 **手柄**（GameController 框架，热插拔）与 **键鼠**
 - **构建**：GitHub Actions CI（macOS runner：XcodeGen + xcodebuild）
@@ -117,28 +122,85 @@ xattr -dr com.apple.quarantine /path/to/Gameshell.app
 open "gameshell://open?url=https://example.com&name=示例"
 ```
 
+## 模拟器（ROM 导入与模拟）
+
+ROM **全由你自己导入**，App 不内置、也不下载任何 ROM。
+
+### 导入（两种方式）
+
+1. 主界面「模拟器 ROM」分区 → 点「导入 ROM」→ 从系统「文件」里选 ROM。
+   选中的文件会被**复制**进沙盒 `Documents/ROMs/<系统>/`；重名自动加序号，**不覆盖**已有文件。
+2. 直接用「文件」App 把 ROM 拷进 `Documents/ROMs/<系统>/`（已开启文件共享），回到 App 会自动扫到。
+
+点开卡片即启动：整屏模拟画面 + 自绘虚拟手柄；长按卡片删除（只删 ROM 文件，同目录的 `.sav` 存档会保留）。
+
+### 各系统接入状态（诚实标注）
+
+| 系统 | 认作的扩展名 | 计划核心（许可证） | 当前状态 |
+| --- | --- | --- | --- |
+| NES | `.nes` `.fds` `.unf` `.unif` | Nestopia（GPL-3.0） | **未接入** |
+| SNES | `.sfc` `.smc` `.swc` `.fig` `.bs` | Snes9x（非商用许可） | **未接入** |
+| GB | `.gb` | mGBA（MPL-2.0） | ✅ **已接入** |
+| GBC | `.gbc` | mGBA（MPL-2.0） | ✅ **已接入** |
+| GBA | `.gba` `.agb` | mGBA（MPL-2.0） | ✅ **已接入** |
+| NDS | `.nds` | melonDS（GPL-3.0） | **未接入** |
+| 3DS | `.3ds` `.cia` `.cci` `.cxi` `.app` | Azahar 系（GPL-2.0，**需 JIT**） | **未接入** |
+| Wii | `.wbfs` `.iso` `.rvz` `.wia` `.dol` `.elf` | Dolphin（GPL-2.0+，**需 JIT**） | **未接入** |
+| Wii U | `.wud` `.wux` `.rpx` `.wua` `.rpl` | Cemu / MeloCafe 系（MPL-2.0，**需 JIT**） | **未接入** |
+
+> 未接入的系统也能**导入** ROM（文件先待在库里），只是点开时 App 会如实告诉你「核心还没接入」，不会假装能玩。
+
+### 为什么核心是静态链接，而不是动态加载
+
+iOS 15 + A12 起系统封禁了 `dynamic-codesigning` 与 `com.apple.private.cs.debugger`，
+运行时 `dlopen` 一个**未签名**的核心动态库已经不可行（RetroArch 那种「外挂 core dylib」的做法在 TrollStore 上也不成立）。
+因此核心一律用 CMake 交叉编译成 arm64 静态库，**直接链接进主二进制**
+（见 [Scripts/build_cores.sh](Scripts/build_cores.sh)；编译不成功时会降级成「该核心不可用」，不会让整个构建挂掉）。
+
+### JIT（3DS / Wii / Wii U 必需）
+
+需要 JIT 的平台，App 会在启动前**真实探测**（直接在进程里 `mmap(MAP_JIT)` 试探）；拿不到可执行内存时如实提示，并给出两条开启路径：
+
+1. **TrollStore（巨魔）安装**：装好后即为 App 打开了 JIT 权限。若进 App 仍提示未开，点提示条上的「开启 JIT」——
+   App 会用 `apple-magnifier://enable-jit?bundle-id=<本 App bundle-id>` 拉起 TrollStore 开一次，回到 App 点「重试」。
+2. **普通侧载（没有 TrollStore）**：用 **StikDebug** 附加调试器后再启动 App，由调试器授予 JIT。
+
+> 现状：**目前还没有任何依赖 JIT 的核心真正接入**，上面两条路径是为后续接入准备的；现在 JIT 探测结果只用于**如实展示状态**。
+
 ## 目录结构
 
 ```
 Sources/
-├── App/                    # Swift：入口与全局状态
-│   ├── GameshellApp.swift  # @main，注册 gameshell:// scheme
-│   └── AppState.swift      # 清单增删/持久化、URL 启动、浮层、外设状态
-├── Core/                   # Objective-C：核心逻辑
-│   ├── GSGameManifest.h/.m # 清单解析 + 增删 + 沙盒持久化
-│   ├── GSGameLauncher.h/.m # 深链解析 / URL 规整
-│   ├── GSInputManager.h/.m # 手柄（GCController）+ 键鼠在线探测
+├── App/                        # Swift：入口与全局状态
+│   ├── GameshellApp.swift      # @main，注册 gameshell:// scheme
+│   ├── AppState.swift          # 清单 / ROM 库、启动、浮层、外设状态
+│   └── GSAudioPlayer.swift     # 模拟器音频（核心 → AVAudioEngine，iOS）
+├── Core/                       # Objective-C：核心逻辑 + 模拟器宿主
+│   ├── GSGameManifest.h/.m     # 清单解析 + 增删 + 沙盒持久化
+│   ├── GSGameLauncher.h/.m     # 深链解析 / URL 规整
+│   ├── GSInputManager.h/.m     # 手柄（GCController）+ 键鼠在线探测
+│   ├── GSSystem.h/.m           # 模拟器「系统」注册表（扩展名 → 系统 → 计划核心）
+│   ├── GSROMLibrary.h/.m       # ROM 扫描 / 导入 / 删除 / .sav 路径
+│   ├── GSEmulator.h/.m         # 会话 + 帧循环 + 音频环形缓冲 + JIT 探测（GSJIT）
+│   ├── GSMGBACore.m            # mGBA 宿主适配（GBA / GB / GBC）
+│   ├── GSBuiltCoresCompat.h    # 编译期开关：核心没编出来就降级为「不可用」
 │   └── Gameshell-Bridging-Header.h
-└── UI/                     # Swift：SwiftUI 界面
-    ├── Theme.swift         # 设计令牌（颜色/圆角/间距/字号/尺寸）
-    ├── Components/         # 顶栏、方块卡片（PS5 风格）、封面
-    ├── Screens/            # 主界面 / 播放器（WebView）
-    └── Overlay/            # 自绘浮层 + App 内添加 URL 表单（禁系统弹窗）
+└── UI/                         # Swift：SwiftUI 界面
+    ├── Theme.swift             # 设计令牌（颜色/圆角/间距/字号/尺寸）
+    ├── Components/             # 顶栏、方块卡片（PS5 风格）、封面
+    ├── Screens/                # 主界面 / 播放器（WebView）/ 模拟器（EmulatorView）
+    ├── Emulator/               # ROM 库分区 + 自绘虚拟手柄
+    └── Overlay/                # 自绘浮层 + 添加 URL 表单 + 导入 ROM 浮层
 Resources/
-├── games.json              # 内置兜底清单（默认为空）
+├── games.json                  # 内置兜底清单（默认为空）
 └── Assets.xcassets
 
+Vendor/mgba/                    # mGBA 源码（MPL-2.0），CI 里交叉编译成 arm64 静态库
+Scripts/build_cores.sh          # 编译核心 → build/cores/<平台>/（含 GSBuiltCores.h 开关）
+build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，不提交）
+
 用户数据：沙盒 Documents/games.json（App 内添加的条目）
+         沙盒 Documents/ROMs/<系统>/（自己导入的 ROM 与 .sav 存档）
 ```
 
 ## 设计约束
@@ -149,5 +211,13 @@ Resources/
 
 ## 状态
 
-主界面（PS5 风格方块行 + App 内添加 URL + 沙盒持久化 + URL 启动 + 手柄键鼠探测 + CI）已经可用，业务功能仍在补。
+主界面（PS5 风格方块行 + App 内添加 URL + 沙盒持久化 + URL 启动 + 手柄键鼠探测 + CI）已经可用，
+模拟器部分 **mGBA（GBA / GB / GBC）已经能导入 ROM 并模拟**（画面 + 自绘虚拟手柄 + 声音）；
+NES / SNES / NDS / 3DS / Wii / Wii U 的**核心尚未接入**，业务功能仍在补。
 逐项完成度请看 [REFERENCE.md](REFERENCE.md) 的「未完成清单」。
+
+## 许可证
+
+本仓库以 **GPL-3.0** 发布，全文见 [LICENSE](LICENSE)。
+其中 `Vendor/mgba`（mGBA）为 **MPL-2.0**；计划接入的 Nestopia 为 GPL-3.0、Snes9x 为非商用许可。
+第三方组件与接入进度在 [LICENSE](LICENSE) 末尾与 [REFERENCE.md](REFERENCE.md) 里如实列出。

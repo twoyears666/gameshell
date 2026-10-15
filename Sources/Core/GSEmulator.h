@@ -63,7 +63,8 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 
 /// TrollStore 上用来给指定 bundle id 打开 JIT 的 URL：
 /// apple-magnifier://enable-jit?bundle-id=<bundleID>
-+ (NSURL *)trollStoreEnableJITURLForBundleID:(NSString *)bundleID;
+/// bundle id 拼不出合法 URL 时返回 nil（Swift 侧就是这么判空的）
++ (nullable NSURL *)trollStoreEnableJITURLForBundleID:(NSString *)bundleID;
 
 /// 申请一块可读可写可执行的 JIT 内存；失败返回 NULL（未开 JIT 时就是这样）。
 + (nullable void *)allocateExecutableMemoryWithSize:(size_t)size;

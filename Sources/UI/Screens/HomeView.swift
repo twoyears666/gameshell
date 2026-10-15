@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// 主界面（唯一界面）：顶栏 + 第一排 PS5 风格方块行 + App 内添加 URL 的自绘表单。
-/// App 不内置任何游戏，方块行渲染的全是用户在 App 内自己添加的 URL。
+/// 主界面（唯一界面）：顶栏 + 第一排 PS5 风格方块行 + App 内添加 URL 的自绘表单
+/// + 模拟器 ROM 分区（iOS）。
+/// App 不内置任何游戏 / ROM，方块行渲染的全是用户自己添加或导入的内容。
 struct HomeView: View {
     @EnvironmentObject private var state: AppState
 
     @State private var isAdding = false
+    @State private var isImportingROM = false
     @State private var draftName = ""
     @State private var draftURL = ""
 
@@ -30,6 +32,16 @@ struct HomeView: View {
                             onLongPress: { state.confirmRemoval(of: $0) }
                         )
                     }
+
+                    #if os(iOS)
+                    // 模拟器 ROM：App 不内置 ROM，这里全是用户自己导入的文件
+                    RomLibrarySection(
+                        roms: state.roms,
+                        onImport: { withAnimation(Theme.Motion.spring) { isImportingROM = true } },
+                        onOpen: { state.launchROM($0) },
+                        onDelete: { state.confirmROMRemoval(of: $0) }
+                    )
+                    #endif
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Theme.Spacing.md)
@@ -38,10 +50,22 @@ struct HomeView: View {
         }
         .background(Theme.Color.background)
         .overlay {
-            if isAdding {
-                AddGameForm(name: $draftName, urlString: $draftURL, onCancel: dismissAdd, onSave: save)
+            ZStack {
+                if isAdding {
+                    AddGameForm(name: $draftName, urlString: $draftURL, onCancel: dismissAdd, onSave: save)
+                }
+                #if os(iOS)
+                if isImportingROM {
+                    ImportROMSheet(onClose: dismissImport)
+                }
+                #endif
             }
         }
+        .onAppear { state.refreshROMs() }
+    }
+
+    private func dismissImport() {
+        withAnimation(Theme.Motion.standard) { isImportingROM = false }
     }
 
     // MARK: - 顶栏右侧的添加按钮

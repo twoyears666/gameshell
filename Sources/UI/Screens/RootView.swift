@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 根视图：只有主界面 + 播放器全屏覆盖 + 自绘浮层。
+/// 根视图：只有主界面 + 播放器全屏覆盖（网页 / 模拟器）+ 自绘浮层。
 struct RootView: View {
     @EnvironmentObject private var state: AppState
 
@@ -17,6 +17,15 @@ struct RootView: View {
                     .zIndex(20)
             }
 
+            #if os(iOS)
+            // 打开 ROM 时全屏覆盖模拟器（画面 + 自绘虚拟手柄）
+            if state.playingROM != nil {
+                EmulatorView()
+                    .transition(.opacity)
+                    .zIndex(21)
+            }
+            #endif
+
             // 自绘浮层：本 App 唯一允许的「弹窗」形态
             if let overlay = state.overlay {
                 CustomOverlayLayer(request: overlay) {
@@ -25,5 +34,6 @@ struct RootView: View {
             }
         }
         .animation(Theme.Motion.standard, value: state.playingGame?.identifier)
+        .animation(Theme.Motion.standard, value: state.playingROM?.identifier)
     }
 }

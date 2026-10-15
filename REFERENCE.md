@@ -13,6 +13,13 @@
 | **盖世游戏 / GameHub**（App Store，应用介绍页） | 界面视觉语言与信息结构 | **仅参考外观与布局思路**，用于确定本项目的 UI 壳形态 |
 | **PlayStation 5 系统首页** | 首页第一排的横向方块行布局与聚焦表现 | 仅参考「一排大号方块卡片、聚焦项放大并高亮、其余变暗」的呈现方式 |
 | Apple **GameController** 框架文档 | 手柄输入接入方式 | 使用官方 API，非第三方代码 |
+| **RetroArch** | 「系统（system）」的划分与扩展名归类思路 | **只参考概念与命名**；**明确不借鉴它的触屏 UI**（用户要求），也**不**采用它「外挂 libretro 动态库」的加载方式 |
+| **Delta / manic emu** | 虚拟按键（十字键 / A·B / START·SELECT / 肩键）的布置与手感 | 仅参考操控布局；按键**全部由本项目用 SwiftUI 自绘**，没有复制其代码/资源 |
+| **MeloCafe** | Wii U 在 iOS 上的接入方式 | **尚未接入**，仅作为后续接入时的参考 |
+| **mGBA**（`Vendor/mgba`，MPL-2.0） | 直接调用其 C API，提供 GBA / GB / GBC 模拟 | **已真实接入**：源码放进 `Vendor/mgba`，CI 交叉编译成 arm64 静态库链接进主二进制——这不是「参考外观」，是真正在用它的源码 |
+
+> 除了盖世游戏 / GameHub / PS5 的「结构与视觉风格」，以及 mGBA 这种**直接链接进来的源码**，
+> 其它条目都只用于「思路与概念」层面的参考，**没有复制其代码、图片、字体或资源文件**。
 
 > 参考范围严格限定为「**结构与视觉风格**」。
 > 本项目**没有**复制盖世游戏 / GameHub / PlayStation 的任何代码、图片、字体或资源文件。
@@ -61,6 +68,18 @@
 | GitHub Actions CI（iOS 真机 + macOS 编译） | ✅ 已实现 | `.github/workflows/build.yml` |
 | IPA 打包（`Payload/Gameshell.app` → `.ipa`） | ✅ 已实现（**ad-hoc 自签名**，非开发者证书签名） | `.github/workflows/build.yml` |
 | TrollStore 用的 `.tipa` | ✅ 已实现（内容与 IPA 相同，仅后缀不同） | `.github/workflows/build.yml` |
+| **模拟器：ROM 导入**（App 内文件选择器 → 复制进沙盒 `Documents/ROMs/<系统>/`，重名加序号不覆盖） | ✅ 已实现（iOS） | `Sources/Core/GSROMLibrary.m` + `Sources/UI/Overlay/ImportROMSheet.swift` |
+| **模拟器：GBA / GB / GBC 实机模拟**（mGBA 静态链接进主二进制） | ✅ 已实现（iOS） | `Sources/Core/GSMGBACore.m` + `Sources/Core/GSEmulator.m` |
+| **模拟器：画面输出**（核心出 RGBA8888 → CGImage，`CADisplayLink` 按屏幕刷新率取最新帧） | ✅ 已实现（iOS） | `GSEmulator.m` + `EmulatorView.EmulatorFrameSource` |
+| **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
+| **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` |
+| **模拟器：主界面 ROM 分区**（按系统分组 + 核心接入状态表） | ✅ 已实现（iOS） | `Sources/UI/Emulator/RomLibrarySection.swift` |
+| **模拟器：JIT 能力探测**（真的去 `mmap(MAP_JIT)` 试探）+ TrollStore 探测 | ✅ 已实现 | `GSJIT`（`Sources/Core/GSEmulator.m`） |
+| **模拟器：核心编译期降级**（某个核心没编出来 → 该项目如实标成「不可用」，不拖垮整个构建） | ✅ 已实现 | `Scripts/build_cores.sh` + `Sources/Core/GSBuiltCoresCompat.h` |
+
+> **诚实补一句**：上表「已实现」指的是**代码已写完并进入 CI 构建**。
+> GBA 的画面 / 声音 / 虚拟手柄**尚未在真机上逐项实测过**（我这边没有可用的测试设备），
+> 所以「能跑起来」目前只能保证到「构建通过、逻辑按核心文档对齐」这一层，**不宣称已经真机验证**。
 
 ---
 

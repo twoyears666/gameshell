@@ -22,6 +22,18 @@ final class AppState: ObservableObject {
     /// 正在打开的游戏（http(s) 走内置 WebView）
     @Published var playingGame: GSGame?
 
+    /// ROM 库：从沙盒 Documents/ROMs 扫出来的用户自己的 ROM
+    @Published private(set) var roms: [GSROM] = []
+
+    /// 正在玩的 ROM（非 nil 时整屏交给 EmulatorView）
+    @Published private(set) var playingROM: GSROM?
+
+    /// 当前这次游玩的模拟器会话
+    @Published private(set) var emulatorSession: GSEmulatorSession?
+
+    /// 会话启动失败的原因（例如缺少 JIT）；nil = 已经正常启动
+    @Published private(set) var emulatorStartFailure: String?
+
     @Published var overlay: OverlayRequest?
 
     /// 外设状态摘要（手柄 / 键鼠）
@@ -29,8 +41,14 @@ final class AppState: ObservableObject {
 
     private var inputObserver: NSObjectProtocol?
 
+    #if os(iOS)
+    /// 模拟器声音（核心 → AVAudioEngine）
+    private var audioPlayer: GSAudioPlayer?
+    #endif
+
     init() {
         loadManifest()
+        refreshROMs()
         observeInput()
     }
 
@@ -157,6 +175,98 @@ final class AppState: ObservableObject {
 
     func stopPlaying() {
         playingGame = nil
+    }
+
+    // MARK: - 模拟器 ROM
+
+    /// 重新扫描沙盒里的 Documents/ROMs
+    func refreshROMs() {
+        roms = GSROMLibrary.allROMs()
+    }
+
+    /// 导入一份 ROM（文件选择器给的 URL）→ 复制进沙盒里对应的系统目录
+    func importROM(from url: URL) {
+        do {
+            let rom = try GSROMLibrary.importFile(at: url)
+            refreshROMs()
+
+            let info = GSSystemRegistry.info(for: rom.system)
+            if info.coreIntegrated {
+                let core = GSEmulatorSession.coreName(for: info.system) ?? "核心"
+                showToast("已导入「\(rom.name)」（\(info.shortName) · \(core)）")
+            } else {
+                showToast("已导入「\(rom.name)」，但 \(info.shortName) 的核心还没接入，暂时打不开")
+            }
+        } catch {
+            showToast(error.localizedDescription)
+        }
+    }
+
+    /// 删除 ROM 前先走自绘确认浮层
+    func confirmROMRemoval(of rom: GSROM) {
+        let info = GSSystemRegistry.info(for: rom.system)
+        confirm(title: "删除「\(rom.name)」？",
+                message: "只删沙盒里这份 ROM 文件（\(info.shortName) 目录），同目录的 .sav 存档会留着。",
+                confirmTitle: "删除") { [weak self] in
+            self?.remove(rom)
+        }
+    }
+
+    private func remove(_ rom: GSROM) {
+        do {
+            try GSROMLibrary.delete(rom)
+            refreshROMs()
+            showToast("已删除「\(rom.name)」")
+        } catch {
+            showToast("删除失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// 打开一个 ROM。没有核心的系统如实拒绝，不假装能玩。
+    func launchROM(_ rom: GSROM) {
+        let info = GSSystemRegistry.info(for: rom.system)
+        guard GSEmulatorSession.hasCore(for: rom.system) else {
+            showToast("\(info.shortName)：\(info.statusNote ?? "尚无可用核心")")
+            return
+        }
+
+        stopPlaying()
+        stopPlayingROM()
+
+        playingROM = rom
+        emulatorSession = GSEmulatorSession(rom: rom)
+        emulatorStartFailure = nil
+        startEmulator()
+    }
+
+    /// 手动重试（例如刚在 TrollStore 里开完 JIT）
+    func retryEmulatorStart() {
+        emulatorStartFailure = nil
+        startEmulator()
+    }
+
+    private func startEmulator() {
+        guard let session = emulatorSession else { return }
+        do {
+            try session.start()
+            #if os(iOS)
+            audioPlayer = GSAudioPlayer(session: session)
+            audioPlayer?.start()
+            #endif
+        } catch {
+            emulatorStartFailure = error.localizedDescription
+        }
+    }
+
+    func stopPlayingROM() {
+        #if os(iOS)
+        audioPlayer?.stop()
+        audioPlayer = nil
+        #endif
+        emulatorSession?.stop()
+        emulatorSession = nil
+        playingROM = nil
+        emulatorStartFailure = nil
     }
 
     // MARK: - 深链
