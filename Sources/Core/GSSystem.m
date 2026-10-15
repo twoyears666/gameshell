@@ -63,7 +63,7 @@
                        shortName: @"NES"
                   fileExtensions: @[@"nes", @"fds", @"unf", @"unif"]
                   plannedCoreName: @"Nestopia"
-               plannedCoreLicense: @"GPL-3.0"
+               plannedCoreLicense: @"GPL-2.0-or-later"
                       requiresJIT: NO],
 
             [self infoWithSystem: GSSystemSNES
@@ -71,8 +71,8 @@
                      displayName: @"Super Nintendo Entertainment System"
                        shortName: @"SNES"
                   fileExtensions: @[@"sfc", @"smc", @"swc", @"fig", @"bs"]
-                  plannedCoreName: @"Snes9x"
-               plannedCoreLicense: @"Snes9x License（非商用，见 REFERENCE.md）"
+                  plannedCoreName: @"待定"
+               plannedCoreLicense: @"必须是 GPL-3.0 兼容的核心（原计划的 Snes9x 是非商用许可，与整仓 GPL-3.0 不兼容，已排除）"
                       requiresJIT: NO],
 
             [self infoWithSystem: GSSystemGB

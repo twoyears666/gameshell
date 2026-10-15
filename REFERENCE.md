@@ -17,8 +17,10 @@
 | **Delta / manic emu** | 虚拟按键（十字键 / A·B / START·SELECT / 肩键）的布置与手感 | 仅参考操控布局；按键**全部由本项目用 SwiftUI 自绘**，没有复制其代码/资源 |
 | **MeloCafe** | Wii U 在 iOS 上的接入方式 | **尚未接入**，仅作为后续接入时的参考 |
 | **mGBA**（`Vendor/mgba`，MPL-2.0） | 直接调用其 C API，提供 GBA / GB / GBC 模拟 | **已真实接入**：源码放进 `Vendor/mgba`，CI 交叉编译成 arm64 静态库链接进主二进制——这不是「参考外观」，是真正在用它的源码 |
+| **Nestopia**（`Vendor/nestopia`，GPL-2.0-or-later） | 直接调用其 C++ API（`Nes::Core::Api`），提供 NES / Famicom 模拟 | **已真实接入**：同上，源码入库 + CI 交叉编译成静态库；不用它给 RetroArch 用的 libretro 前端 |
+| **Snes9x** | 原计划用它做 SNES | **不接入**：其许可证为「非商用专用」（不是开源许可、与 GPL-3.0 不兼容），因此不引入其源码 |
 
-> 除了盖世游戏 / GameHub / PS5 的「结构与视觉风格」，以及 mGBA 这种**直接链接进来的源码**，
+> 除了盖世游戏 / GameHub / PS5 的「结构与视觉风格」，以及 mGBA / Nestopia 这种**直接链接进来的源码**，
 > 其它条目都只用于「思路与概念」层面的参考，**没有复制其代码、图片、字体或资源文件**。
 
 > 参考范围严格限定为「**结构与视觉风格**」。
@@ -70,6 +72,7 @@
 | TrollStore 用的 `.tipa` | ✅ 已实现（内容与 IPA 相同，仅后缀不同） | `.github/workflows/build.yml` |
 | **模拟器：ROM 导入**（App 内文件选择器 → 复制进沙盒 `Documents/ROMs/<系统>/`，重名加序号不覆盖） | ✅ 已实现（iOS） | `Sources/Core/GSROMLibrary.m` + `Sources/UI/Overlay/ImportROMSheet.swift` |
 | **模拟器：GBA / GB / GBC 实机模拟**（mGBA 静态链接进主二进制） | ✅ 已实现（iOS） | `Sources/Core/GSMGBACore.m` + `Sources/Core/GSEmulator.m` |
+| **模拟器：NES 实机模拟**（Nestopia 静态链接进主二进制；256×240 RGBA 画面 + 单声道扩立体声 + 电池存档） | ✅ 已实现（iOS），CI 已确认 `libnestopia.a` 编出并链接通过 | `Sources/Core/GSNestopiaCore.mm` + `Sources/Core/GSEmulator.m` |
 | **模拟器：画面输出**（核心出 RGBA8888 → CGImage，`CADisplayLink` 按屏幕刷新率取最新帧） | ✅ 已实现（iOS） | `GSEmulator.m` + `EmulatorView.EmulatorFrameSource` |
 | **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
 | **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` |
@@ -78,7 +81,7 @@
 | **模拟器：核心编译期降级**（某个核心没编出来 → 该项目如实标成「不可用」，不拖垮整个构建） | ✅ 已实现 | `Scripts/build_cores.sh` + `Sources/Core/GSBuiltCoresCompat.h` |
 
 > **诚实补一句**：上表「已实现」指的是**代码已写完并进入 CI 构建**。
-> GBA 的画面 / 声音 / 虚拟手柄**尚未在真机上逐项实测过**（我这边没有可用的测试设备），
+> GBA / NES 的画面 / 声音 / 虚拟手柄**尚未在真机上逐项实测过**（我这边没有可用的测试设备），
 > 所以「能跑起来」目前只能保证到「构建通过、逻辑按核心文档对齐」这一层，**不宣称已经真机验证**。
 
 ---
@@ -111,6 +114,21 @@
 | 榜单 / 在线榜单接口 | **不提供**（榜单页已移除） |
 | 资讯 | **不提供**（资讯区块已移除） |
 | 分类筛选 / 关键词搜索 | **不提供**（相关页面已移除） |
+
+### 模拟器核心接入进度
+
+| 系统 | 核心（许可证） | 状态 |
+| --- | --- | --- |
+| GB / GBC / GBA | mGBA（MPL-2.0） | ✅ 已接入，静态链接进主二进制 |
+| NES / Famicom | Nestopia（GPL-2.0-or-later） | ✅ 已接入，静态链接进主二进制（CI 已确认编出并链接通过） |
+| SNES | 待定（必须是 GPL-3.0 兼容的核心） | **未接入**。原计划的 Snes9x 因「非商用许可」与整仓 GPL-3.0 不兼容，已排除 |
+| NDS | melonDS（GPL-3.0） | **未接入**（只有空壳库 + `GS_HAVE_* 0`） |
+| 3DS | Azahar 系（GPL-2.0） | **未接入**，且**需要 JIT** |
+| Wii | Dolphin（GPL-2.0+） | **未接入**，且**需要 JIT** |
+| Wii U | Cemu / MeloCafe 系 | **未接入**，且**需要 JIT** |
+
+> 未接入的系统**仍然可以导入 ROM**（文件待在 `Documents/ROMs/<系统>/`），
+> 点开时由 `GSSystem` 的 `coreIntegrated` 如实判定并提示「核心尚未接入」，不会假装能玩。
 
 ### 已实现但暂不展示的字段
 

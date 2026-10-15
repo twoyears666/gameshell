@@ -684,10 +684,16 @@ Gameshell 以 GNU General Public License v3.0（即上面全文）发布。
     已接入：Game Boy / Game Boy Color / Game Boy Advance
     许可证全文：Vendor/mgba/LICENSE
 
-  · Nestopia —— 计划接入（NES），GPL-3.0。**尚未接入**
+  · Vendor/nestopia —— Nestopia，GPL-2.0-or-later（上游 COPYING 是 GPLv2 全文，
+    每个源文件头部声明「either version 2 of the License, or (at your option) any
+    later version」，因此可按 GPL-3.0 一并分发）。
+    已接入：NES / Famicom（含 FDS / UNIF 等 NES 家族格式）
+    许可证全文：Vendor/nestopia/COPYING
 
-  · Snes9x —— 计划接入（SNES）。其许可证为非商用许可（Snes9x License），
-    分发时须保留原署名，且不得用于商业用途。**尚未接入**
+  · Snes9x —— **不接入**。其许可证为非商用许可（"freeware for PERSONAL USE only"、
+    "Under no circumstances will commercial rights be given"），不是开源许可，
+    与整仓 GPL-3.0 不兼容，因此本项目不引入它的源码。
+    SNES 改用 GPL-3.0 的核心（见下条）。
 
   · NDS / 3DS / Wii / Wii U 的计划核心（Azahar / Dolphin / Cemu 等）
     **均尚未接入**，各自许可证以其上游仓库为准，接入时会补到这里。
