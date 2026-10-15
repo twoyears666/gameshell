@@ -72,7 +72,13 @@ STUB
 		xcrun --sdk iphoneos clang -arch arm64 -target arm64-apple-ios16.0 \
 			-c "$tmpdir/gs_stub.c" -o "$tmpdir/gs_stub.o" > "$tmpdir/cc.log" 2>&1
 	else
-		clang -c "$tmpdir/gs_stub.c" -o "$tmpdir/gs_stub.o" > "$tmpdir/cc.log" 2>&1
+		# 桌面 / 模拟器：编成 arm64 + x86_64 的通用库。
+		# 只编主机架构的话，在另一种架构的构建机上会被 ld 直接整档忽略
+		# （ld: warning: ignoring file ... required architecture 'x86_64'）。
+		clang -arch arm64 -c "$tmpdir/gs_stub.c" -o "$tmpdir/gs_stub_arm64.o" > "$tmpdir/cc.log" 2>&1 \
+			&& clang -arch x86_64 -c "$tmpdir/gs_stub.c" -o "$tmpdir/gs_stub_x86_64.o" >> "$tmpdir/cc.log" 2>&1 \
+			&& lipo -create "$tmpdir/gs_stub_arm64.o" "$tmpdir/gs_stub_x86_64.o" \
+				-output "$tmpdir/gs_stub.o" >> "$tmpdir/cc.log" 2>&1
 	fi
 	stub_obj="$tmpdir/gs_stub.o"
 
