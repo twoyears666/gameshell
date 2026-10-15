@@ -28,6 +28,11 @@ extern id<GSEmulatorCore> GSMGBACoreCreate(void);
 extern id<GSEmulatorCore> GSNestopiaCoreCreate(void);
 #endif
 
+#if GS_HAVE_MESENS
+/// 实现在 GSSnesCore.mm（ObjC++：Mesen-S 是 C++ 库，走 libretro 接口）
+extern id<GSEmulatorCore> GSSnesCoreCreate(void);
+#endif
+
 NSString *const GSEmulatorErrorDomain = @"GSEmulatorErrorDomain";
 
 typedef NS_ENUM(NSInteger, GSEmulatorErrorCode) {
@@ -188,6 +193,11 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         return GSNestopiaCoreCreate();
     }
 #endif
+#if GS_HAVE_MESENS
+    if (system == GSSystemSNES) {
+        return GSSnesCoreCreate();
+    }
+#endif
     return nil;
 }
 
@@ -204,6 +214,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 #endif
 #if GS_HAVE_NESTOPIA
         dict[@(GSSystemNES)] = @"Nestopia";
+#endif
+#if GS_HAVE_MESENS
+        dict[@(GSSystemSNES)] = @"Mesen-S";
 #endif
         names = [dict copy];
     });

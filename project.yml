@@ -103,12 +103,15 @@ targets:
           # Nestopia 的核心头与 C++ API 头（GSNestopiaCore.mm 直接 include）
           - $(SRCROOT)/Vendor/nestopia/source/core
           - $(SRCROOT)/Vendor/nestopia/source/core/api
+          # Mesen-S 的 libretro 契约头（GSSnesCore.mm include 了 libretro.h）
+          - $(SRCROOT)/Vendor/mesens/Libretro
         # 静态库按平台放在 build/cores/<PLATFORM>，macOS 上是空壳库（保证 -lmgba 找得到）
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/build/cores/$(PLATFORM_NAME)
         OTHER_LDFLAGS:
           - -lmgba
           - -lnestopia
+          - -lmesens
 
 schemes:
   Gameshell:

@@ -690,10 +690,15 @@ Gameshell 以 GNU General Public License v3.0（即上面全文）发布。
     已接入：NES / Famicom（含 FDS / UNIF 等 NES 家族格式）
     许可证全文：Vendor/nestopia/COPYING
 
+  · Vendor/mesens —— Mesen-S，GPL-3.0（GNU General Public License v3.0）。
+    已接入：SNES / Super Famicom（走它的 Libretro 前端形态，-DLIBRETRO 交叉编译）
+    许可证全文：Vendor/mesens/LICENSE
+    （说明：该仓库上游为 github.com/SourMesen/Mesen-S，2019 年归档，许可证即 GPLv3。）
+
   · Snes9x —— **不接入**。其许可证为非商用许可（"freeware for PERSONAL USE only"、
     "Under no circumstances will commercial rights be given"），不是开源许可，
     与整仓 GPL-3.0 不兼容，因此本项目不引入它的源码。
-    SNES 改用 GPL-3.0 的核心（见下条）。
+    SNES 改用 GPL-3.0 的 Mesen-S（见上条）。
 
   · NDS / 3DS / Wii / Wii U 的计划核心（Azahar / Dolphin / Cemu 等）
     **均尚未接入**，各自许可证以其上游仓库为准，接入时会补到这里。

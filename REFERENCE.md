@@ -18,9 +18,10 @@
 | **MeloCafe** | Wii U 在 iOS 上的接入方式 | **尚未接入**，仅作为后续接入时的参考 |
 | **mGBA**（`Vendor/mgba`，MPL-2.0） | 直接调用其 C API，提供 GBA / GB / GBC 模拟 | **已真实接入**：源码放进 `Vendor/mgba`，CI 交叉编译成 arm64 静态库链接进主二进制——这不是「参考外观」，是真正在用它的源码 |
 | **Nestopia**（`Vendor/nestopia`，GPL-2.0-or-later） | 直接调用其 C++ API（`Nes::Core::Api`），提供 NES / Famicom 模拟 | **已真实接入**：同上，源码入库 + CI 交叉编译成静态库；不用它给 RetroArch 用的 libretro 前端 |
+| **Mesen-S**（`Vendor/mesens`，GPL-3.0） | 走它的 **libretro 前端形态**（`Libretro/libretro.cpp` 已是核心侧实现），提供 SNES / Super Famicom 模拟 | **已真实接入**：源码入库（182 个源文件，源清单照抄上游 `Libretro/Makefile.common`）+ `-DLIBRETRO` 交叉编译成静态库。宿主侧只用它的 libretro 契约，**没有复制 RetroArch 的任何代码** |
 | **Snes9x** | 原计划用它做 SNES | **不接入**：其许可证为「非商用专用」（不是开源许可、与 GPL-3.0 不兼容），因此不引入其源码 |
 
-> 除了盖世游戏 / GameHub / PS5 的「结构与视觉风格」，以及 mGBA / Nestopia 这种**直接链接进来的源码**，
+> 除了盖世游戏 / GameHub / PS5 的「结构与视觉风格」，以及 mGBA / Nestopia / Mesen-S 这种**直接链接进来的源码**，
 > 其它条目都只用于「思路与概念」层面的参考，**没有复制其代码、图片、字体或资源文件**。
 
 > 参考范围严格限定为「**结构与视觉风格**」。
@@ -73,6 +74,7 @@
 | **模拟器：ROM 导入**（App 内文件选择器 → 复制进沙盒 `Documents/ROMs/<系统>/`，重名加序号不覆盖） | ✅ 已实现（iOS） | `Sources/Core/GSROMLibrary.m` + `Sources/UI/Overlay/ImportROMSheet.swift` |
 | **模拟器：GBA / GB / GBC 实机模拟**（mGBA 静态链接进主二进制） | ✅ 已实现（iOS） | `Sources/Core/GSMGBACore.m` + `Sources/Core/GSEmulator.m` |
 | **模拟器：NES 实机模拟**（Nestopia 静态链接进主二进制；256×240 RGBA 画面 + 单声道扩立体声 + 电池存档） | ✅ 已实现（iOS），CI 已确认 `libnestopia.a` 编出并链接通过 | `Sources/Core/GSNestopiaCore.mm` + `Sources/Core/GSEmulator.m` |
+| **模拟器：SNES 实机模拟**（Mesen-S 静态链接进主二进制；XRGB8888 → RGBA8888 逐像素转换 + 可变分辨率重分配缓冲 + 32040Hz 交错立体声 + 宿主侧 SRAM 落盘） | ⚠️ **代码已写完、CI 编译链接通过，但尚未实机实测**（详见下方「诚实补一句」） | `Sources/Core/GSSnesCore.mm` + `Sources/Core/GSEmulator.m` |
 | **模拟器：画面输出**（核心出 RGBA8888 → CGImage，`CADisplayLink` 按屏幕刷新率取最新帧） | ✅ 已实现（iOS） | `GSEmulator.m` + `EmulatorView.EmulatorFrameSource` |
 | **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
 | **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` |
@@ -83,6 +85,10 @@
 > **诚实补一句**：上表「已实现」指的是**代码已写完并进入 CI 构建**。
 > GBA / NES 的画面 / 声音 / 虚拟手柄**尚未在真机上逐项实测过**（我这边没有可用的测试设备），
 > 所以「能跑起来」目前只能保证到「构建通过、逻辑按核心文档对齐」这一层，**不宣称已经真机验证**。
+>
+> SNES（Mesen-S）也一样：本机既没有 iOS SDK 也没有 cmake，**无法在本地真机/模拟器上跑过**，
+> 只能做语法预检（`clang -fsyntax-only`）与源清单比对，真正的编译验证交给 CI。
+> 因此它现在标的是 **⚠️ 待实机验证**，而不是 ✅。
 
 ---
 
@@ -121,7 +127,7 @@
 | --- | --- | --- |
 | GB / GBC / GBA | mGBA（MPL-2.0） | ✅ 已接入，静态链接进主二进制 |
 | NES / Famicom | Nestopia（GPL-2.0-or-later） | ✅ 已接入，静态链接进主二进制（CI 已确认编出并链接通过） |
-| SNES | 待定（必须是 GPL-3.0 兼容的核心） | **未接入**。原计划的 Snes9x 因「非商用许可」与整仓 GPL-3.0 不兼容，已排除 |
+| SNES / Super Famicom | Mesen-S（GPL-3.0） | ✅ 已接入，静态链接进主二进制；⚠️ **尚未实机实测**（CI 验证编译链接，本机无 iOS 工具链）。原计划的 Snes9x 因「非商用许可」与整仓 GPL-3.0 不兼容，已排除 |
 | NDS | melonDS（GPL-3.0） | **未接入**（只有空壳库 + `GS_HAVE_* 0`） |
 | 3DS | Azahar 系（GPL-2.0） | **未接入**，且**需要 JIT** |
 | Wii | Dolphin（GPL-2.0+） | **未接入**，且**需要 JIT** |

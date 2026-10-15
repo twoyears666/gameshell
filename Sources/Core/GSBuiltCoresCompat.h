@@ -26,8 +26,8 @@
 #define GS_HAVE_NESTOPIA 0
 #endif
 
-#ifndef GS_HAVE_SNES9X
-#define GS_HAVE_SNES9X 0
+#ifndef GS_HAVE_MESENS
+#define GS_HAVE_MESENS 0
 #endif
 
 #endif /* GS_BUILT_CORES_COMPAT_H */

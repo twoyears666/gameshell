@@ -71,8 +71,8 @@
                      displayName: @"Super Nintendo Entertainment System"
                        shortName: @"SNES"
                   fileExtensions: @[@"sfc", @"smc", @"swc", @"fig", @"bs"]
-                  plannedCoreName: @"待定"
-               plannedCoreLicense: @"必须是 GPL-3.0 兼容的核心（原计划的 Snes9x 是非商用许可，与整仓 GPL-3.0 不兼容，已排除）"
+                  plannedCoreName: @"Mesen-S"
+               plannedCoreLicense: @"GPL-3.0"
                       requiresJIT: NO],
 
             [self infoWithSystem: GSSystemGB

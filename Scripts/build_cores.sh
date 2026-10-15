@@ -10,7 +10,8 @@
 # 当前接入的核心：
 #   mGBA     —— GBA / GB / GBC（Vendor/mgba，MPL-2.0）
 #   Nestopia —— NES / Famicom（Vendor/nestopia，GPL-3.0）
-# 尚无源码 / 尚未接入的核心（Snes9x、melonDS、Azahar、Dolphin、Cemu 等）只留空壳库，
+#   Mesen-S  —— SNES / Super Famicom（Vendor/mesens，GPL-3.0）
+# 尚无源码 / 尚未接入的核心（melonDS、Azahar、Dolphin、Cemu 等）只留空壳库，
 # 由 GSBuiltCores.h 里的开关如实标成 0。
 #
 # 产物（每个平台一份，互不污染）：
@@ -34,13 +35,14 @@ HEADER="$OUT_DIR/GSBuiltCores.h"
 
 MGBA_DIR="$ROOT/Vendor/mgba"
 NESTOPIA_DIR="$ROOT/Vendor/nestopia"
+MESENS_DIR="$ROOT/Vendor/mesens"
 
 mkdir -p "$OUT_DIR"
 
 # 各核心「这次是否真的编出来了」，最后写进 GSBuiltCores.h
 have_mgba=0
 have_nestopia=0
-have_snes9x=0
+have_mesens=0
 summary=""
 
 log() { printf '[build_cores] %s\n' "$*"; }
@@ -97,21 +99,21 @@ write_header() {
 // 1 = 对应核心已真正编进主二进制（0 = 空壳，宿主会如实提示「核心尚未接入」）
 #define GS_HAVE_MGBA $have_mgba
 #define GS_HAVE_NESTOPIA $have_nestopia
-#define GS_HAVE_SNES9X $have_snes9x
+#define GS_HAVE_MESENS $have_mesens
 
 #define GS_CORES_PLATFORM "$PLATFORM"
 #define GS_CORES_NOTE "$summary"
 
 #endif
 EOF
-	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Snes9x=${have_snes9x}）"
+	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Mesen-S=${have_mesens}）"
 }
 
 # 收尾：没编出来的核心补空壳库，然后写编译期开关头。成功编出来的核心不动（不覆盖真库）。
 finalize() {
 	[ "$have_mgba" -eq 1 ] || make_stub_library mgba
 	[ "$have_nestopia" -eq 1 ] || make_stub_library nestopia
-	[ "$have_snes9x" -eq 1 ] || make_stub_library snes9x
+	[ "$have_mesens" -eq 1 ] || make_stub_library mesens
 	write_header
 }
 
@@ -119,7 +121,7 @@ finalize() {
 finish_without_cores() {
 	have_mgba=0
 	have_nestopia=0
-	have_snes9x=0
+	have_mesens=0
 	summary="$1"
 	finalize
 	exit 0
@@ -279,12 +281,25 @@ else
 	log "找不到 ${NESTOPIA_DIR}/CMakeLists.txt，跳过 Nestopia"
 fi
 
+# ---------------------------------------------------------------- Mesen-S（SNES / Super Famicom）
+# 上游是 2019 年归档的 C++14 核心（Vendor/mesens，GPL-3.0）。
+# 我们按它的 Libretro/ 前端形态编（Vendor/mesens/CMakeLists.txt 的源清单逐项照抄
+# Libretro/Makefile.common），宿主侧走 libretro 接口（见 Sources/Core/GSSnesCore.mm）。
+# -DLIBRETRO 由 CMakeLists.txt 内部定义，不能用切换宏关掉：
+#   它切掉的是「桌面版才有的独立解码/渲染线程 + Lua + 联网」——
+#   带上它 retro_run 才会在调用线程里同步跑完一帧，宿主的逐帧架构才成立。
+if [ -f "$MESENS_DIR/CMakeLists.txt" ]; then
+	build_cmake_core mesens "$MESENS_DIR" mesens \
+		&& have_mesens=1
+else
+	log "找不到 ${MESENS_DIR}/CMakeLists.txt，跳过 Mesen-S"
+fi
+
 # ---------------------------------------------------------------- 汇总
-# Snes9x 的源码还没入库（Vendor/snes9x 不存在），因此这里恒为 0 ——
-# finalize 会给它补空壳库，UI 侧据 GS_HAVE_SNES9X == 0 如实标「未接入」。
 built=""
 [ "$have_mgba" -eq 1 ] && built="${built}mGBA（GBA/GB/GBC）、"
 [ "$have_nestopia" -eq 1 ] && built="${built}Nestopia（NES）、"
+[ "$have_mesens" -eq 1 ] && built="${built}Mesen-S（SNES）、"
 if [ -z "$built" ]; then
 	summary="本次没有核心编译成功（见各 *-configure.log / *-build.log）"
 else

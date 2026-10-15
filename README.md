@@ -2,7 +2,7 @@
 
 一个 **iOS / iPadOS / macOS** 的 URL 启动器 **UI 壳**（shell）。
 界面风格参考 **盖世游戏 / GameHub**、第一排方块行参考 **PS5 首页**，但**不使用其任何代码或资源**，仅参照「布局结构与视觉语言」。
-本仓库以「壳 + 启动通路」为主；模拟器部分**已接入 mGBA 与 Nestopia**（GBA / GB / GBC / NES），其余系统**尚未接入**。
+本仓库以「壳 + 启动通路」为主；模拟器部分**已接入 mGBA、Nestopia 与 Mesen-S**（GBA / GB / GBC / NES / SNES），其余系统**尚未接入**。
 功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
 
 - **只有一个界面**：主界面（顶栏 + 第一排方块行），没有游戏库 / 榜单 / 我的等其它页面
@@ -13,7 +13,7 @@
 - **不内置任何游戏**：清单默认为空，所有条目都由你自己添加
 - **模拟器 ROM 导入与模拟**：主界面「模拟器 ROM」分区，导入 ROM 后点开卡片即用内置核心模拟；
   **不内置任何 ROM**，全部由你自己导入（App 内导入，或从「文件」App 拷进 `Documents/ROMs/<系统>/`）
-- **已接入的核心**：**mGBA**（GBA / GB / GBC）+ **Nestopia**（NES）；SNES / NDS / 3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
+- **已接入的核心**：**mGBA**（GBA / GB / GBC）+ **Nestopia**（NES）+ **Mesen-S**（SNES）；NDS / 3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
 - **虚拟手柄**：操控界面自绘（布局参照 Delta / manic emu），**不借鉴 RetroArch 的触屏 UI**
 - **第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
 - **输入**：支持 **手柄**（GameController 框架，热插拔）与 **键鼠**
@@ -139,7 +139,7 @@ ROM **全由你自己导入**，App 不内置、也不下载任何 ROM。
 | 系统 | 认作的扩展名 | 计划核心（许可证） | 当前状态 |
 | --- | --- | --- | --- |
 | NES | `.nes` `.fds` `.unf` `.unif` | Nestopia（GPL-2.0-or-later） | ✅ **已接入** |
-| SNES | `.sfc` `.smc` `.swc` `.fig` `.bs` | 计划用 GPL-3.0 的核心（**不用 Snes9x**，见下） | **未接入** |
+| SNES | `.sfc` `.smc` `.swc` `.fig` `.bs` | Mesen-S（GPL-3.0） | ✅ **已接入** |
 | GB | `.gb` | mGBA（MPL-2.0） | ✅ **已接入** |
 | GBC | `.gbc` | mGBA（MPL-2.0） | ✅ **已接入** |
 | GBA | `.gba` `.agb` | mGBA（MPL-2.0） | ✅ **已接入** |
@@ -151,7 +151,7 @@ ROM **全由你自己导入**，App 不内置、也不下载任何 ROM。
 > **为什么 SNES 不用 Snes9x**：Snes9x 的许可证是「非商用专用」
 > （"freeware for PERSONAL USE only"，且 libretro 移植部分写明 "Under no circumstances
 > will commercial rights be given"），它**不是开源许可、也与 GPL-3.0 不兼容**，
-> 所以本仓库不引入它的源码。SNES 改用 GPL-3.0 许可的核心。
+> 所以本仓库不引入它的源码。SNES 最终选了同样是 GPL-3.0 的 **Mesen-S**。
 >
 > 未接入的系统也能**导入** ROM（文件先待在库里），只是点开时 App 会如实告诉你「核心还没接入」，不会假装能玩。
 
@@ -189,6 +189,7 @@ Sources/
 │   ├── GSEmulator.h/.m         # 会话 + 帧循环 + 音频环形缓冲 + JIT 探测（GSJIT）
 │   ├── GSMGBACore.m            # mGBA 宿主适配（GBA / GB / GBC）
 │   ├── GSNestopiaCore.mm       # Nestopia 宿主适配（NES，ObjC++：Nestopia 是 C++）
+│   ├── GSSnesCore.mm           # Mesen-S 宿主适配（SNES，ObjC++：走 libretro 接口）
 │   ├── GSBuiltCoresCompat.h    # 编译期开关：核心没编出来就降级为「不可用」
 │   └── Gameshell-Bridging-Header.h
 └── UI/                         # Swift：SwiftUI 界面
@@ -203,6 +204,7 @@ Resources/
 
 Vendor/mgba/                    # mGBA 源码（MPL-2.0），CI 里交叉编译成 arm64 静态库
 Vendor/nestopia/                # Nestopia 源码（GPL-2.0-or-later），同上
+Vendor/mesens/                  # Mesen-S 源码（GPL-3.0），同上
 Scripts/build_cores.sh          # 编译核心 → build/cores/<平台>/（含 GSBuiltCores.h 开关）
 build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，不提交）
 
@@ -221,7 +223,9 @@ build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，�
 主界面（PS5 风格方块行 + App 内添加 URL + 沙盒持久化 + URL 启动 + 手柄键鼠探测 + CI）已经可用，
 模拟器部分 **mGBA（GBA / GB / GBC）与 Nestopia（NES）已经能导入 ROM 并模拟**
 （画面 + 自绘虚拟手柄 + 声音；NES 画面 256×240，音频是单声道扩成立体声）；
-SNES / NDS / 3DS / Wii / Wii U 的**核心尚未接入**，业务功能仍在补。
+**Mesen-S（SNES）** 的宿主适配也已完成、CI 里交叉编译并链接通过，
+但**本机没有 iOS 工具链、尚未实机实测**（所以先按「已接入、待实机验证」对待，不写成「实测可玩」）；
+NDS / 3DS / Wii / Wii U 的**核心尚未接入**，业务功能仍在补。
 逐项完成度请看 [REFERENCE.md](REFERENCE.md) 的「未完成清单」。
 
 ## 许可证
@@ -229,6 +233,6 @@ SNES / NDS / 3DS / Wii / Wii U 的**核心尚未接入**，业务功能仍在补
 本仓库以 **GPL-3.0** 发布，全文见 [LICENSE](LICENSE)。
 `Vendor/` 下的第三方源码各自保留原许可：`Vendor/mgba`（mGBA）为 **MPL-2.0**，
 `Vendor/nestopia`（Nestopia）为 **GPL-2.0-or-later**（其每个源文件都写明可选用更高版本，
-所以能按 GPL-3.0 一并分发）。
+所以能按 GPL-3.0 一并分发），`Vendor/mesens`（Mesen-S）为 **GPL-3.0**。
 **Snes9x 不引入**（非商用许可，与 GPL-3.0 不兼容）。
 第三方组件与接入进度在 [LICENSE](LICENSE) 末尾与 [REFERENCE.md](REFERENCE.md) 里如实列出。
