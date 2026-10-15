@@ -471,7 +471,11 @@ struct GSNestopiaContext {
 
 @end
 
-id<GSEmulatorCore> GSNestopiaCoreCreate(void) {
+// 注意：本文件是 Objective-C++，而调用方 GSEmulator.m 是 Objective-C（C 链接）。
+// 不写 extern "C" 的话这里会生成 C++ 修饰名（__Z21GSNestopiaCoreCreatev），
+// 链接期就会报 "_GSNestopiaCoreCreate undefined symbols"。
+// 以后任何用 .mm 写的核心胶水层，导出给宿主的那几个函数都必须这样声明。
+extern "C" id<GSEmulatorCore> GSNestopiaCoreCreate(void) {
     return [GSNestopiaCore create];
 }
 
