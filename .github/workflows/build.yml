@@ -15,7 +15,7 @@ jobs:
   build:
     name: Build (iOS + macOS + IPA)
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -25,9 +25,10 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
+          cmake --version || true
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen + CMake
+        run: brew install xcodegen cmake
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -52,6 +53,19 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build
+
+      # 核心是交叉编译出来的：不管成功失败都把开关头和日志打出来，方便定位问题
+      - name: Report emulator core status
+        if: always()
+        run: |
+          echo "---- build/cores/iphoneos ----"
+          ls -la build/cores/iphoneos 2>/dev/null || echo "(没有 build/cores/iphoneos)"
+          echo "---- GSBuiltCores.h ----"
+          cat build/cores/iphoneos/GSBuiltCores.h 2>/dev/null || echo "(没有 GSBuiltCores.h)"
+          echo "---- cmake configure log (tail) ----"
+          tail -n 40 build/cores/iphoneos/cmake-configure.log 2>/dev/null || true
+          echo "---- cmake build log (tail) ----"
+          tail -n 60 build/cores/iphoneos/cmake-build.log 2>/dev/null || true
 
       - name: Ad-hoc sign app
         run: |

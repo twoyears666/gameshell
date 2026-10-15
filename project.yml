@@ -12,7 +12,9 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.9"
-    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # 必须关掉脚本沙箱：预构建脚本要调 cmake / xcrun 交叉编译 mGBA，
+    # 并往 $(SRCROOT)/build/cores 写产物，沙箱会把这些操作全部拦下来。
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
 
@@ -26,6 +28,15 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+    preBuildScripts:
+      # 交叉编译 mGBA 静态库（GBA/GB/GBC）并生成 GSBuiltCores.h 编译期开关。
+      # 编译失败不会让构建失败：脚本会写 GS_HAVE_MGBA 0 + 空壳库。
+      # macOS 平台按设计直接跳过（保持纯 URL 模式）。
+      - name: Build emulator cores
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          "$SRCROOT/Scripts/build_cores.sh"
     info:
       path: Sources/Resources/Info.plist
       properties:
@@ -64,6 +75,12 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: false
         GCSupportsControllerUserInteraction: true
+        # ---- ROM 导入：让「文件」App 能直接看到自己的 Documents/ROMs ----
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        # ---- 探测 TrollStore：用来给本 App 打开 JIT 权限 ----
+        LSApplicationQueriesSchemes:
+          - apple-magnifier
         # ---- macOS 相关 ----
         NSHighResolutionCapable: true
     settings:
@@ -79,6 +96,15 @@ targets:
         GCC_C_LANGUAGE_STANDARD: gnu11
         CLANG_CXX_LANGUAGE_STANDARD: gnu++17
         ENABLE_HARDENED_RUNTIME: NO
+        # 预构建脚本产出的编译期开关头（GSBuiltCores.h）与 mGBA 公开头都从这里找
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/build/cores/$(PLATFORM_NAME)
+          - $(SRCROOT)/Vendor/mgba/include
+        # 静态库按平台放在 build/cores/<PLATFORM>，macOS 上是空壳库（保证 -lmgba 找得到）
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/build/cores/$(PLATFORM_NAME)
+        OTHER_LDFLAGS:
+          - -lmgba
 
 schemes:
   Gameshell:
