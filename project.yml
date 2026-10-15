@@ -96,15 +96,19 @@ targets:
         GCC_C_LANGUAGE_STANDARD: gnu11
         CLANG_CXX_LANGUAGE_STANDARD: gnu++17
         ENABLE_HARDENED_RUNTIME: NO
-        # 预构建脚本产出的编译期开关头（GSBuiltCores.h）与 mGBA 公开头都从这里找
+        # 预构建脚本产出的编译期开关头（GSBuiltCores.h）与各核心的公开头都从这里找
         HEADER_SEARCH_PATHS:
           - $(SRCROOT)/build/cores/$(PLATFORM_NAME)
           - $(SRCROOT)/Vendor/mgba/include
+          # Nestopia 的核心头与 C++ API 头（GSNestopiaCore.mm 直接 include）
+          - $(SRCROOT)/Vendor/nestopia/source/core
+          - $(SRCROOT)/Vendor/nestopia/source/core/api
         # 静态库按平台放在 build/cores/<PLATFORM>，macOS 上是空壳库（保证 -lmgba 找得到）
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/build/cores/$(PLATFORM_NAME)
         OTHER_LDFLAGS:
           - -lmgba
+          - -lnestopia
 
 schemes:
   Gameshell:

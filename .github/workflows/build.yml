@@ -62,10 +62,12 @@ jobs:
           ls -la build/cores/iphoneos 2>/dev/null || echo "(没有 build/cores/iphoneos)"
           echo "---- GSBuiltCores.h ----"
           cat build/cores/iphoneos/GSBuiltCores.h 2>/dev/null || echo "(没有 GSBuiltCores.h)"
-          echo "---- cmake configure log (tail) ----"
-          tail -n 40 build/cores/iphoneos/cmake-configure.log 2>/dev/null || true
-          echo "---- cmake build log (tail) ----"
-          tail -n 60 build/cores/iphoneos/cmake-build.log 2>/dev/null || true
+          # 每个核心一份日志：<核心名>-configure.log / <核心名>-build.log
+          for log in build/cores/iphoneos/*-configure.log build/cores/iphoneos/*-build.log; do
+            [ -f "$log" ] || continue
+            echo "---- $log (tail) ----"
+            tail -n 60 "$log" || true
+          done
 
       - name: Ad-hoc sign app
         run: |

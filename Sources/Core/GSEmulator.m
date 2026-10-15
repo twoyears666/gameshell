@@ -23,6 +23,11 @@
 extern id<GSEmulatorCore> GSMGBACoreCreate(void);
 #endif
 
+#if GS_HAVE_NESTOPIA
+/// 实现在 GSNestopiaCore.mm（ObjC++：Nestopia 是 C++ 库）
+extern id<GSEmulatorCore> GSNestopiaCoreCreate(void);
+#endif
+
 NSString *const GSEmulatorErrorDomain = @"GSEmulatorErrorDomain";
 
 typedef NS_ENUM(NSInteger, GSEmulatorErrorCode) {
@@ -94,8 +99,10 @@ typedef NS_ENUM(NSInteger, GSEmulatorErrorCode) {
 
 /// 音频环形缓冲的容量（int16 元素个数，交错立体声）
 static const size_t GSAudioRingCapacity = 65536;
-/// 一帧视频最多多少字节（GBA 240x160 RGBA）
-static const size_t GSMaxFrameBytes = 240 * 160 * 4;
+/// 一帧视频最多多少字节（RGBA8888）。
+/// 取 1024x512 —— 覆盖目前接入 / 计划接入的核心里最大的那些画面：
+/// NES 256x240、GBA 240x160、SNES 高分辨率 512x448、Wii 640x480 都落在里面。
+static const size_t GSMaxFrameBytes = 1024 * 512 * 4;
 
 /// CGDataProvider 的释放回调
 static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
@@ -176,6 +183,11 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
             break;
     }
 #endif
+#if GS_HAVE_NESTOPIA
+    if (system == GSSystemNES) {
+        return GSNestopiaCoreCreate();
+    }
+#endif
     return nil;
 }
 
@@ -189,6 +201,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         dict[@(GSSystemGBA)] = @"mGBA";
         dict[@(GSSystemGB)]  = @"mGBA";
         dict[@(GSSystemGBC)] = @"mGBA";
+#endif
+#if GS_HAVE_NESTOPIA
+        dict[@(GSSystemNES)] = @"Nestopia";
 #endif
         names = [dict copy];
     });

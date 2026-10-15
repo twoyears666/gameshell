@@ -7,11 +7,17 @@
 #   运行时 dlopen 一个未签名的 core dylib 会被直接拒（RetroArch 那种「外挂 core」的做法
 #   在 TrollStore 上也不成立）。所以核心一律静态链接进主二进制。
 #
-# 产物（每个平台一份，互不污染）：
-#   build/cores/<PLATFORM>/libmgba.a      —— 静态库（编译失败时是空壳，保证链接不报错）
-#   build/cores/<PLATFORM>/GSBuiltCores.h —— 编译期开关，告诉源码哪个核心真的进来了
+# 当前接入的核心：
+#   mGBA     —— GBA / GB / GBC（Vendor/mgba，MPL-2.0）
+#   Nestopia —— NES / Famicom（Vendor/nestopia，GPL-3.0）
+# 尚无源码 / 尚未接入的核心（Snes9x、melonDS、Azahar、Dolphin、Cemu 等）只留空壳库，
+# 由 GSBuiltCores.h 里的开关如实标成 0。
 #
-# 编译失败不会让 Xcode 构建失败：会写出 GS_HAVE_MGBA 0 的头文件 + 空壳库，
+# 产物（每个平台一份，互不污染）：
+#   build/cores/<PLATFORM>/lib<核心名>.a   —— 静态库（编译失败时是空壳，保证链接不报错）
+#   build/cores/<PLATFORM>/GSBuiltCores.h  —— 编译期开关，告诉源码哪个核心真的进来了
+#
+# 编译失败不会让 Xcode 构建失败：会给对应核心写一个空壳库 + GS_HAVE_* 0，
 # 于是 App 照常构建，只是如实显示「核心尚未接入」。
 #
 # 用法：
@@ -25,47 +31,34 @@ PLATFORM="${1:-${PLATFORM_NAME:-iphoneos}}"
 
 OUT_DIR="$ROOT/build/cores/$PLATFORM"
 HEADER="$OUT_DIR/GSBuiltCores.h"
-LIB="$OUT_DIR/libmgba.a"
 
 MGBA_DIR="$ROOT/Vendor/mgba"
-MGBA_BUILD_DIR="$OUT_DIR/mgba-build"
+NESTOPIA_DIR="$ROOT/Vendor/nestopia"
 
 mkdir -p "$OUT_DIR"
 
+# 各核心「这次是否真的编出来了」，最后写进 GSBuiltCores.h
 have_mgba=0
+have_nestopia=0
+have_snes9x=0
 summary=""
 
 log() { printf '[build_cores] %s\n' "$*"; }
 
-write_header() {
-	local have="$1"
-	local note="$2"
-	cat > "$HEADER" <<EOF
-// 由 Scripts/build_cores.sh 自动生成，请勿手改。
-#ifndef GS_BUILT_CORES_H
-#define GS_BUILT_CORES_H
-
-// 1 = mGBA（GBA / GB / GBC）已真正编进主二进制
-#define GS_HAVE_MGBA $have
-
-#define GS_CORES_PLATFORM "$PLATFORM"
-#define GS_CORES_NOTE "$note"
-
-#endif
-EOF
-	log "写出 ${HEADER}（GS_HAVE_MGBA=${have}）"
-}
-
-# 造一个空壳静态库，让 -lmgba 一定能找到文件（没核心时不会有符号被引用）。
-# 注意：空壳里必须真的放一个「目标架构」的 .o，否则链接器会报
-# "built for ... which is not the architecture being linked"。
+# 造一个空壳静态库，让 -l<核心名> 一定能找到文件（没核心时不会有符号被引用）。
+# 注意两点：
+#  1) 空壳里必须真的放一个「目标架构」的 .o，否则链接器会报
+#     "built for ... which is not the architecture being linked"；
+#  2) 每个核心的空壳用**不同的**符号名。多个空壳库一起链接时，符号重名会直接
+#     "duplicate symbol"，而不同名的空壳永远不会被引用，链接器会整档忽略。
 make_stub_library() {
+	local name="$1"
+	local lib="$OUT_DIR/lib${name}.a"
 	local tmpdir stub_obj
 	tmpdir="$(mktemp -d)"
-	# 必须有一个全局符号，否则归档的符号表为空，链接时会有噪音警告
-	cat > "$tmpdir/gs_stub.c" <<'STUB'
-/* 空壳：本平台没有接入任何模拟器核心（见 GSBuiltCores.h） */
-int gs_cores_stub(void) { return 0; }
+	cat > "$tmpdir/gs_stub.c" <<STUB
+/* 空壳：本平台没有接入 ${name} 核心（见 GSBuiltCores.h） */
+int gs_cores_stub_${name}(void) { return 0; }
 STUB
 
 	if [ "$PLATFORM" = "iphoneos" ]; then
@@ -83,16 +76,110 @@ STUB
 	stub_obj="$tmpdir/gs_stub.o"
 
 	if [ -f "$stub_obj" ]; then
-		rm -f "$LIB"
-		if xcrun ar rcs "$LIB" "$stub_obj" 2>/dev/null || ar rcs "$LIB" "$stub_obj" 2>/dev/null; then
-			log "生成空壳静态库 $LIB"
+		rm -f "$lib"
+		if xcrun ar rcs "$lib" "$stub_obj" 2>/dev/null || ar rcs "$lib" "$stub_obj" 2>/dev/null; then
+			log "生成空壳静态库 ${lib}"
 		else
-			log "警告：无法生成空壳静态库 ${LIB}（-lmgba 可能找不到文件）"
+			log "警告：无法生成空壳静态库 ${lib}（-l${name} 可能找不到文件）"
 		fi
 	else
-		log "警告：空壳目标文件编译失败，见 $tmpdir/cc.log"
+		log "警告：空壳目标文件编译失败，见 ${tmpdir}/cc.log"
 	fi
 	rm -rf "$tmpdir"
+}
+
+write_header() {
+	cat > "$HEADER" <<EOF
+// 由 Scripts/build_cores.sh 自动生成，请勿手改。
+#ifndef GS_BUILT_CORES_H
+#define GS_BUILT_CORES_H
+
+// 1 = 对应核心已真正编进主二进制（0 = 空壳，宿主会如实提示「核心尚未接入」）
+#define GS_HAVE_MGBA $have_mgba
+#define GS_HAVE_NESTOPIA $have_nestopia
+#define GS_HAVE_SNES9X $have_snes9x
+
+#define GS_CORES_PLATFORM "$PLATFORM"
+#define GS_CORES_NOTE "$summary"
+
+#endif
+EOF
+	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Snes9x=${have_snes9x}）"
+}
+
+# 收尾：没编出来的核心补空壳库，然后写编译期开关头。成功编出来的核心不动（不覆盖真库）。
+finalize() {
+	[ "$have_mgba" -eq 1 ] || make_stub_library mgba
+	[ "$have_nestopia" -eq 1 ] || make_stub_library nestopia
+	[ "$have_snes9x" -eq 1 ] || make_stub_library snes9x
+	write_header
+}
+
+# 一个核心都没编（平台/工具链不满足）时的统一收尾
+finish_without_cores() {
+	have_mgba=0
+	have_nestopia=0
+	have_snes9x=0
+	summary="$1"
+	finalize
+	exit 0
+}
+
+# 交叉编译一个 cmake 工程形态的核心。
+# 用法：build_cmake_core <核心名> <源码目录> <cmake 目标名> [额外的 -D 参数...]
+# 成功返回 0 并把产物放到 $OUT_DIR/lib<核心名>.a；失败返回 1，日志留在
+# $OUT_DIR/<核心名>-configure.log 与 <核心名>-build.log。
+#
+# 与 mGBA 相同的两个交叉编译要点（用 cmake 的 iOS 交叉编译规则，不依赖 Xcode 工程）：
+#   CMAKE_SYSTEM_NAME=iOS + CMAKE_OSX_SYSROOT/ARCHITECTURES/DEPLOYMENT_TARGET
+#   CMAKE_C_COMPILER / CMAKE_CXX_COMPILER 显式指向 SDK 里的 clang（不指的话 cmake
+#   会挑到宿主 /usr/bin/c++，编出来的库是 macOS 架构，链接期直接被忽略）
+#   CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY —— 只编译不链接地试探编译器，
+#   交叉编译时不会有「链接不到 SDK 里的库」这类噪音失败。
+build_cmake_core() {
+	local name="$1"
+	local src_dir="$2"
+	local target="$3"
+	shift 3
+
+	local build_dir="$OUT_DIR/${name}-build"
+	local configure_log="$OUT_DIR/${name}-configure.log"
+	local build_log="$OUT_DIR/${name}-build.log"
+	local built
+
+	cmake -S "$src_dir" -B "$build_dir" \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$SDK_NAME" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+		-DCMAKE_C_COMPILER="$CC" \
+		-DCMAKE_CXX_COMPILER="$CXX" \
+		-DCMAKE_C_COMPILER_WORKS=1 \
+		-DCMAKE_CXX_COMPILER_WORKS=1 \
+		-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		"$@" > "$configure_log" 2>&1
+	if [ $? -ne 0 ]; then
+		log "${name} 的 cmake 配置失败，详情见 ${configure_log}"
+		return 1
+	fi
+
+	log "开始编译 lib${name}.a（日志：${build_log}）"
+	cmake --build "$build_dir" --target "$target" --parallel 4 > "$build_log" 2>&1
+	if [ $? -ne 0 ]; then
+		log "${name} 编译失败，详情见 ${build_log}"
+		return 1
+	fi
+
+	built="$(find "$build_dir" -name "lib${name}.a" -type f 2>/dev/null | head -n 1)"
+	if [ -z "$built" ]; then
+		log "编译成功但没找到 lib${name}.a，详情见 ${build_log}"
+		return 1
+	fi
+
+	cp "$built" "$OUT_DIR/lib${name}.a"
+	log "完成：${OUT_DIR}/lib${name}.a（$(du -h "$OUT_DIR/lib${name}.a" | cut -f1)）"
+	return 0
 }
 
 # ---------------------------------------------------------------- macOS：不接核心
@@ -100,24 +187,13 @@ STUB
 # macOS 不编译也不链接任何核心，省掉一整条交叉编译风险。
 if [ "$PLATFORM" = "macosx" ]; then
 	log "平台 ${PLATFORM}：按设计不接入模拟器核心（保持 URL-only）"
-	make_stub_library
-	write_header 0 "macOS 不接入模拟器核心（仅 URL 模式）"
-	exit 0
+	finish_without_cores "macOS 不接入模拟器核心（仅 URL 模式）"
 fi
 
 # ---------------------------------------------------------------- 依赖检查
 if ! command -v cmake >/dev/null 2>&1; then
 	log "找不到 cmake，跳过核心编译（CI 上应通过 brew 安装 cmake）"
-	make_stub_library
-	write_header 0 "构建环境缺少 cmake，核心未编译"
-	exit 0
-fi
-
-if [ ! -f "$MGBA_DIR/CMakeLists.txt" ]; then
-	log "找不到 $MGBA_DIR/CMakeLists.txt，跳过核心编译"
-	make_stub_library
-	write_header 0 "缺少 Vendor/mgba 源码，核心未编译"
-	exit 0
+	finish_without_cores "构建环境缺少 cmake，核心未编译"
 fi
 
 # ---------------------------------------------------------------- 目标 SDK
@@ -128,31 +204,26 @@ case "$PLATFORM" in
 	iphonesimulator)
 		# 模拟器构建产物按约定不交付（见 README），这里也顺手跳过省时间
 		log "平台 ${PLATFORM}：按约定不交付模拟器产物，跳过核心编译"
-		make_stub_library
-		write_header 0 "模拟器构建不交付核心"
-		exit 0
+		finish_without_cores "模拟器构建不交付核心"
 		;;
 	*)
 		log "未知平台 ${PLATFORM}，按不接入核心处理"
-		make_stub_library
-		write_header 0 "未知平台 ${PLATFORM}"
-		exit 0
+		finish_without_cores "未知平台 ${PLATFORM}"
 		;;
 esac
 
 if ! xcrun --sdk "$SDK_NAME" --show-sdk-path >/dev/null 2>&1; then
-	log "找不到 $SDK_NAME SDK（需要完整 Xcode），跳过核心编译"
-	make_stub_library
-	write_header 0 "缺少 $SDK_NAME SDK，核心未编译"
-	exit 0
+	log "找不到 ${SDK_NAME} SDK（需要完整 Xcode），跳过核心编译"
+	finish_without_cores "缺少 ${SDK_NAME} SDK，核心未编译"
 fi
 
 SDK_PATH="$(xcrun --sdk "$SDK_NAME" --show-sdk-path)"
 CC="$(xcrun --sdk "$SDK_NAME" --find clang)"
+CXX="$(xcrun --sdk "$SDK_NAME" --find clang++)"
 
-log "平台=$PLATFORM SDK=$SDK_PATH"
+log "平台=${PLATFORM} SDK=${SDK_PATH}"
 
-# ---------------------------------------------------------------- 配置
+# ---------------------------------------------------------------- mGBA（GBA / GB / GBC）
 # 关键开关（依据 mGBA 官方 CMakeLists 的 LIBMGBA_ONLY 静态库路径）：
 #   LIBMGBA_ONLY=ON        —— 只编库，不编任何前端，自动 BUILD_STATIC=ON / BUILD_SHARED=OFF
 #   ENABLE_DEBUGGERS=OFF   —— 不需要调试器，去掉它库能小一圈
@@ -184,56 +255,41 @@ log "平台=$PLATFORM SDK=$SDK_PATH"
 #   预置成 0（非空且 falsy）可同时骗过 CheckFunctionExists 的两条分支
 #   （`NOT DEFINED VAR` 与 `VAR STREQUAL ""` 都不会命中），于是它不再去 try_compile，
 #   且 flags.h 里的 #cmakedefine HAVE_* 也会被写成 /* #undef */。
-cmake -S "$MGBA_DIR" -B "$MGBA_BUILD_DIR" \
-	-DCMAKE_SYSTEM_NAME=iOS \
-	-DCMAKE_OSX_SYSROOT="$SDK_NAME" \
-	-DCMAKE_OSX_ARCHITECTURES=arm64 \
-	-DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
-	-DCMAKE_C_COMPILER="$CC" \
-	-DCMAKE_C_COMPILER_WORKS=1 \
-	-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-	-DHAVE_POPCOUNT32=0 \
-	-DHAVE_CRC32=0 \
-	-DCMAKE_BUILD_TYPE=MinSizeRel \
-	-DBINARY_NAME=mgba \
-	-DLIBMGBA_ONLY=ON \
-	-DENABLE_DEBUGGERS=OFF \
-	-DUNIX=1 \
-	> "$OUT_DIR/cmake-configure.log" 2>&1
-
-if [ $? -ne 0 ]; then
-	log "cmake 配置失败，详情见 $OUT_DIR/cmake-configure.log"
-	make_stub_library
-	write_header 0 "mGBA 配置失败（见 cmake-configure.log）"
-	exit 0
+if [ -f "$MGBA_DIR/CMakeLists.txt" ]; then
+	build_cmake_core mgba "$MGBA_DIR" mgba \
+		-DHAVE_POPCOUNT32=0 \
+		-DHAVE_CRC32=0 \
+		-DBINARY_NAME=mgba \
+		-DLIBMGBA_ONLY=ON \
+		-DENABLE_DEBUGGERS=OFF \
+		-DUNIX=1 \
+		&& have_mgba=1
+else
+	log "找不到 ${MGBA_DIR}/CMakeLists.txt，跳过 mGBA"
 fi
 
-# ---------------------------------------------------------------- 编译
-log "开始编译 libmgba.a（日志：$OUT_DIR/cmake-build.log）"
-cmake --build "$MGBA_BUILD_DIR" --target mgba --parallel 4 \
-	> "$OUT_DIR/cmake-build.log" 2>&1
-
-if [ $? -ne 0 ]; then
-	log "mGBA 编译失败，详情见 $OUT_DIR/cmake-build.log"
-	make_stub_library
-	write_header 0 "mGBA 编译失败（见 cmake-build.log）"
-	exit 0
+# ---------------------------------------------------------------- Nestopia（NES / Famicom）
+# 上游是 2003-2008 年的 C++98 代码；Vendor/nestopia/CMakeLists.txt 只编
+# source/core/ 下的核心本体 + api 层（不编它给 RetroArch 用的 libretro 前端）。
+# 宿主直接调 Nes::Core::Api（见 Sources/Core/GSNestopiaCore.mm）。
+if [ -f "$NESTOPIA_DIR/CMakeLists.txt" ]; then
+	build_cmake_core nestopia "$NESTOPIA_DIR" nestopia \
+		&& have_nestopia=1
+else
+	log "找不到 ${NESTOPIA_DIR}/CMakeLists.txt，跳过 Nestopia"
 fi
 
-# ---------------------------------------------------------------- 收集产物
-BUILT_LIB="$(find "$MGBA_BUILD_DIR" -name 'libmgba.a' -type f 2>/dev/null | head -n 1)"
-
-if [ -z "$BUILT_LIB" ]; then
-	log "编译成功但没找到 libmgba.a，详情见 $OUT_DIR/cmake-build.log"
-	make_stub_library
-	write_header 0 "mGBA 产物缺失"
-	exit 0
+# ---------------------------------------------------------------- 汇总
+# Snes9x 的源码还没入库（Vendor/snes9x 不存在），因此这里恒为 0 ——
+# finalize 会给它补空壳库，UI 侧据 GS_HAVE_SNES9X == 0 如实标「未接入」。
+built=""
+[ "$have_mgba" -eq 1 ] && built="${built}mGBA（GBA/GB/GBC）、"
+[ "$have_nestopia" -eq 1 ] && built="${built}Nestopia（NES）、"
+if [ -z "$built" ]; then
+	summary="本次没有核心编译成功（见各 *-configure.log / *-build.log）"
+else
+	summary="${built}已接入"
 fi
 
-cp "$BUILT_LIB" "$LIB"
-have_mgba=1
-summary="mGBA 已接入（GBA / GB / GBC）"
-log "完成：${LIB}（$(du -h "$LIB" | cut -f1)）"
-
-write_header "$have_mgba" "$summary"
+finalize
 exit 0
