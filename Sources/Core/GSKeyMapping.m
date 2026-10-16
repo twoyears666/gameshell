@@ -113,14 +113,16 @@ static GSTouchCluster GSTouchClusterFromKey(NSString *key) {
     return GSTouchClusterDPad;
 }
 
-/// 各按键簇的内置默认布局（归一化中心 + 缩放），对应播放器里的默认观感
+/// 各按键簇的内置默认布局（归一化中心 + 缩放）。
+/// 数值直接取自 Delta「Standard GBA」皮肤的 iPhone 横屏布局，按其画布（667×375）归一化：
+/// 十字键左下、A/B 右下、L/R 顶部两角、START/SELECT 底部居中——与 Delta 一致。
 static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
     switch (cluster) {
-        case GSTouchClusterDPad:        return [GSTouchClusterLayout layoutWithX: 0.12 y: 0.78 scale: 1.0];
-        case GSTouchClusterFace:        return [GSTouchClusterLayout layoutWithX: 0.88 y: 0.78 scale: 1.0];
-        case GSTouchClusterL:           return [GSTouchClusterLayout layoutWithX: 0.11 y: 0.11 scale: 1.0];
-        case GSTouchClusterR:           return [GSTouchClusterLayout layoutWithX: 0.89 y: 0.11 scale: 1.0];
-        case GSTouchClusterStartSelect: return [GSTouchClusterLayout layoutWithX: 0.50 y: 0.94 scale: 1.0];
+        case GSTouchClusterDPad:        return [GSTouchClusterLayout layoutWithX: 0.143 y: 0.745 scale: 1.0];
+        case GSTouchClusterFace:        return [GSTouchClusterLayout layoutWithX: 0.865 y: 0.784 scale: 1.0];
+        case GSTouchClusterL:           return [GSTouchClusterLayout layoutWithX: 0.097 y: 0.093 scale: 1.0];
+        case GSTouchClusterR:           return [GSTouchClusterLayout layoutWithX: 0.903 y: 0.093 scale: 1.0];
+        case GSTouchClusterStartSelect: return [GSTouchClusterLayout layoutWithX: 0.501 y: 0.928 scale: 1.0];
     }
     return [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
 }
