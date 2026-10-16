@@ -85,7 +85,15 @@ struct LocalCoverImage<Placeholder: View>: View {
             }
         }
         .onAppear { reload() }
+        // macOS 部署目标就是 14.0，可以直接用新签名；iOS 部署目标是 16.0，
+        // 新的 onChange(of:initial:_:) 要 iOS 17，所以 iOS 侧继续用旧签名
+        // （旧签名在 iOS 16 下不告警）。用 #if 分开而不是 if #available，
+        // 因为可用性判断的 else 分支照样会编译、照样告警。
+        #if os(macOS)
+        .onChange(of: relativePath) { reload() }
+        #else
         .onChange(of: relativePath) { _ in reload() }
+        #endif
     }
 
     private func reload() {

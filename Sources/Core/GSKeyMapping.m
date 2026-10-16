@@ -130,9 +130,17 @@ static NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *GSParseLayoutBuc
         }
         NSDictionary *values = entry;
         GSTouchClusterLayout *layout = [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
-        if ([values[@"x"] isKindOfClass: [NSNumber class]]) { layout.x = [values[@"x"] doubleValue]; }
-        if ([values[@"y"] isKindOfClass: [NSNumber class]]) { layout.y = [values[@"y"] doubleValue]; }
-        if ([values[@"scale"] isKindOfClass: [NSNumber class]]) { layout.scale = [values[@"scale"] doubleValue]; }
+        // keymap.json 是用户可写的边界数据：读回时按头文件声明的范围夹紧
+        // （x / y 0–1、scale 0.6–1.6），免得写坏的数值把按键簇甩到手柄区域之外。
+        if ([values[@"x"] isKindOfClass: [NSNumber class]]) {
+            layout.x = MAX((CGFloat)0.0, MIN((CGFloat)1.0, (CGFloat)[values[@"x"] doubleValue]));
+        }
+        if ([values[@"y"] isKindOfClass: [NSNumber class]]) {
+            layout.y = MAX((CGFloat)0.0, MIN((CGFloat)1.0, (CGFloat)[values[@"y"] doubleValue]));
+        }
+        if ([values[@"scale"] isKindOfClass: [NSNumber class]]) {
+            layout.scale = MAX((CGFloat)0.6, MIN((CGFloat)1.6, (CGFloat)[values[@"scale"] doubleValue]));
+        }
         bucket[@(GSTouchClusterFromKey(key))] = layout;
     }
     return bucket;

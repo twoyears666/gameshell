@@ -141,8 +141,7 @@ struct EmulatorView: View {
                        },
                        onMenu: {
                            // NDS 的 Menu 键等价顶栏的暂停按钮
-                           isPaused.toggle()
-                           session.paused = isPaused
+                           togglePause()
                        })
         .frame(width: area.width, height: area.height)
     }
@@ -162,6 +161,13 @@ struct EmulatorView: View {
                           height: imageSize.height * integerScale)
         }
         return fitted
+    }
+
+    /// 暂停 / 恢复。顶栏按钮与 NDS 的 Menu 键共用这一处，
+    /// 免得两处各写一遍导致 isPaused 与 session.paused 走神。
+    private func togglePause() {
+        isPaused.toggle()
+        state.emulatorSession?.paused = isPaused
     }
 
     // MARK: - 顶栏
@@ -208,8 +214,7 @@ struct EmulatorView: View {
                 Spacer()
 
                 Button {
-                    isPaused.toggle()
-                    state.emulatorSession?.paused = isPaused
+                    togglePause()
                 } label: {
                     Image(systemName: isPaused ? "play.fill" : "pause.fill")
                         .font(.system(size: 13, weight: .semibold))
