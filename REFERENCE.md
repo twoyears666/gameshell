@@ -87,6 +87,8 @@
 | **模拟器：画面输出**（核心出 RGBA8888 → CGImage，`CADisplayLink` 按屏幕刷新率取最新帧） | ✅ 已实现（iOS） | `GSEmulator.m` + `EmulatorView.EmulatorFrameSource` |
 | **模拟器：NDS 触摸输入**（虚拟手柄的下屏触摸区 → 归一化坐标 → `RETRO_DEVICE_POINTER` → melonDS `NDS::TouchScreen`；`melonds_touch_mode` 答为 Touch） | ⚠️ 代码已写完、CI 编译链接通过，**尚未实机实测** | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSEmulator.m` + `Sources/Core/GSMelonDSCore.mm` |
 | **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
+| **模拟器：变速**（顶栏档位按钮**循环 `0.5× / 1× / 2× / 4×`**；改的是宿主帧节奏 `frameIntervalNs = 1e9 / (fps × speed)`，核心每轮仍只跑一帧；速度夹紧在 0.25–4.0；**加速（>1×）时静音**） | ⚠️ 代码已写完、CI 编译链接通过，尚未实机实测 | `Sources/Core/GSEmulator.m` + `Sources/UI/Screens/EmulatorView.swift` |
+| **模拟器：即时存档（快照）**（顶栏「快照」→ 4 槽（带时间戳）存 / 读 / 删，外加**退出时自动写「自动存档」** `auto.state`，可在面板读回 / 删除；核心状态读写必须与 `runFrame` 同线程 → 走「主线程贴请求 → 模拟线程执行 → `dispatch_semaphore` 回传」+ `os_unfair_lock` 保护请求态，暂停时也可存 / 读档） | ⚠️ 代码已写完、CI 编译链接通过，尚未实机实测；**NDS 在 DSi 模式下核心不提供即时存档**（`retro_serialize_size()` 返回 0） | `Sources/Core/GSEmulator.h/.m` + 四个核心 glue（`GSMGBACore.m` / `GSNestopiaCore.mm` / `GSSnesCore.mm` / `GSMelonDSCore.mm`）+ `Sources/UI/Screens/EmulatorView.swift` |
 | **模拟器：自绘虚拟手柄**（**按键簇与默认布局按系统区分**：GB / GBC / NES 为十字键 + A / B + START / SELECT；GBA / SNES 加 L / R，SNES 为 A / B / X / Y 四键菱形；NDS 为四键菱形 + L / R + MENU + 下屏触摸区。每簇位置与大小由 `GSTouchClusterLayout` 归一化坐标决定，可在设置页调整） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSKeyMapping.m` |
 | **模拟器：ROM 并入游戏库**（统一方块行，卡片带系统徽标 / 封面）+ 设置页「核心接入状态表」 | ✅ 已实现（iOS） | `Sources/UI/Components/LibraryItem.swift` + `Sources/UI/Components/GameCard.swift` + `Sources/UI/Emulator/CoreStatusList.swift` |
 | **模拟器：JIT 能力探测**（真的去 `mmap(MAP_JIT)` 试探）+ TrollStore 探测 | ✅ 已实现 | `GSJIT`（`Sources/Core/GSEmulator.m`） |
@@ -104,6 +106,11 @@
 >
 > melonDS（NDS）同理：同样只有静态预检 + CI 编译链接验证，**尚未实机实测**，所以也只标 ⚠️。
 > 其中 **NDS 触摸**（下屏触摸区 → `RETRO_DEVICE_POINTER`）的坐标换算参照核心的 `input.cpp` / `screenlayout.cpp`，**同样未在真机上验证手感与落点精度**。
+>
+> **变速与即时存档（快照）** 同样只到「代码已写完 + CI 编译链接通过」这一层，**尚未实机实测**：
+> 变速靠改宿主帧节奏实现（核心每轮仍只跑一帧），**>1× 时静音**；即时存档的核心状态读写必须与 `runFrame` **同线程**，
+> 因此实现成「主线程贴请求 → 模拟线程执行 → 信号量回传」，并带 3 秒超时兜底，暂停时也能存 / 读档。
+> 帧节奏手感、存档往返一致性都待真机确认；另 **NDS 在 DSi 模式下核心不提供即时存档**（`retro_serialize_size()` 返回 0），此时存档会如实失败并提示，不会假装成功。
 
 ---
 

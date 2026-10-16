@@ -25,12 +25,25 @@ struct EmulatorView: View {
     @StateObject private var frames = EmulatorFrameSource()
     @StateObject private var input = EmulatorInputCoordinator()
     @State private var isPaused = false
+    /// 速度档位下标（对应 Self.speedOptions）
+    @State private var speedIndex = 1
+    /// 快照面板是否打开
+    @State private var snapshotOpen = false
+    /// 4 个存档槽的修改时间（nil = 空槽），打开面板与每次读写后刷新
+    @State private var snapshotDates: [Date?] = [nil, nil, nil, nil]
 
     var body: some View {
         ZStack {
             SwiftUI.Color.black.ignoresSafeArea()
             content
             topBar
+
+            // 快照面板（4 个存档槽），压在画面与顶栏之上
+            if snapshotOpen, let session = state.emulatorSession {
+                snapshotOverlay(session: session)
+                    .transition(.opacity)
+                    .zIndex(5)
+            }
 
             // 硬件键盘捕获（0 尺寸，不参与布局也不遮挡画面）
             KeyboardCaptureView(isActive: true) { usage, pressed in
@@ -170,12 +183,282 @@ struct EmulatorView: View {
         state.emulatorSession?.paused = isPaused
     }
 
+    // MARK: - 速度
+
+    /// 速度档位（循环切换）。只改会话的 emulationSpeed：核心帧率本身不动，
+    /// 宿主靠改帧节奏实现快慢；> 1× 时会话侧自动静音（见 GSEmulator.m 的注释）。
+    private static let speedOptions: [Double] = [0.5, 1, 2, 4]
+
+    private var speedLabel: String {
+        let value = Self.speedOptions[speedIndex]
+        return value == floor(value) ? "\(Int(value))×" : String(format: "%.1f×", value)
+    }
+
+    private var speedButton: some View {
+        Button {
+            cycleSpeed()
+        } label: {
+            Text(speedLabel)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.Color.textPrimary)
+                .frame(minWidth: 32)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
+                .background(panelCapsule)
+        }
+        .buttonStyle(.plain)
+        .disabled(!emulatorInteractive)
+        .opacity(emulatorInteractive ? 1 : 0.4)
+    }
+
+    private func cycleSpeed() {
+        speedIndex = (speedIndex + 1) % Self.speedOptions.count
+        state.emulatorSession?.emulationSpeed = Self.speedOptions[speedIndex]
+    }
+
+    // MARK: - 快照
+
+    private var snapshotButton: some View {
+        Button {
+            openSnapshotPanel()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "camera")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("快照")
+                    .font(.system(size: 12))
+            }
+            .foregroundStyle(Theme.Color.textPrimary)
+            .padding(.horizontal, Theme.Spacing.sm)
+            .padding(.vertical, 6)
+            .background(panelCapsule)
+        }
+        .buttonStyle(.plain)
+        .disabled(!emulatorInteractive)
+        .opacity(emulatorInteractive ? 1 : 0.4)
+    }
+
+    /// 胶囊底：白色面 + 细描边（与顶栏其它控件同一套外观）
+    private var panelCapsule: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+            .fill(Theme.Color.surface)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                    .stroke(Theme.Color.border, lineWidth: 1)
+            )
+    }
+
+    private var emulatorInteractive: Bool {
+        state.emulatorStartFailure == nil && (state.emulatorSession?.isAvailable ?? false)
+    }
+
+    private func openSnapshotPanel() {
+        refreshSnapshotDates()
+        snapshotOpen = true
+    }
+
+    private var currentSnapshotStore: EmulatorSnapshotStore? {
+        guard let rom = state.playingROM else { return nil }
+        return EmulatorSnapshotStore(romIdentifier: rom.identifier)
+    }
+
+    private func refreshSnapshotDates() {
+        guard let store = currentSnapshotStore else {
+            snapshotDates = Array(repeating: nil, count: EmulatorSnapshotStore.slotCount)
+            return
+        }
+        snapshotDates = (0..<EmulatorSnapshotStore.slotCount).map { store.modificationDate(slot: $0) }
+    }
+
+    /// 退出前的自动存档：静默写进 auto.state，失败不打扰用户。
+    private func autoSaveSnapshot() {
+        guard let session = state.emulatorSession, let store = currentSnapshotStore else { return }
+        guard session.supportsSaveStates, let data = session.copySnapshot() else { return }
+        _ = store.write(data, slot: EmulatorSnapshotStore.autoSlot)
+    }
+
+    private func saveSnapshot(slot: Int) {
+        guard let session = state.emulatorSession, let store = currentSnapshotStore else { return }
+        guard session.supportsSaveStates else {
+            state.showToast("这个核心还不支持即时存档")
+            return
+        }
+        guard let data = session.copySnapshot() else {
+            state.showToast("存档失败")
+            return
+        }
+        if store.write(data, slot: slot) {
+            refreshSnapshotDates()
+            state.showToast("已存到存档 \(slot + 1)")
+        } else {
+            state.showToast("存档写入失败")
+        }
+    }
+
+    private func loadSnapshot(slot: Int) {
+        guard let session = state.emulatorSession, let store = currentSnapshotStore else { return }
+        guard let data = store.read(slot: slot) else {
+            state.showToast("存档 \(slot + 1) 是空的")
+            return
+        }
+        if session.restoreSnapshot(data) {
+            snapshotOpen = false
+            state.showToast("已读回存档 \(slot + 1)")
+        } else {
+            state.showToast("读档失败（存档可能与当前核心或 ROM 不匹配）")
+        }
+    }
+
+    private func deleteSnapshot(slot: Int) {
+        guard let store = currentSnapshotStore else { return }
+        store.delete(slot: slot)
+        refreshSnapshotDates()
+    }
+
+    private func snapshotOverlay(session: GSEmulatorSession) -> some View {
+        ZStack {
+            SwiftUI.Color.black.opacity(0.55)
+                .ignoresSafeArea()
+                .onTapGesture { snapshotOpen = false }
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text("即时存档")
+                        .font(Theme.Font.section)
+                        .foregroundStyle(Theme.Color.textPrimary)
+                    Spacer()
+                    Button {
+                        snapshotOpen = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.Color.textSecondary)
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.top, Theme.Spacing.md)
+
+                if session.supportsSaveStates {
+                    VStack(spacing: Theme.Spacing.xs) {
+                        ForEach(0..<EmulatorSnapshotStore.slotCount, id: \.self) { slot in
+                            snapshotSlotRow(slot: slot)
+                        }
+                        if let store = currentSnapshotStore {
+                            snapshotAutoRow(store: store)
+                        }
+                    }
+                    .padding(.horizontal, Theme.Spacing.md)
+
+                    Text("退出模拟器时会自动写一份「自动存档」（auto.state）。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.Color.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.top, Theme.Spacing.xs)
+                } else {
+                    Text("这个核心还不支持即时存档。")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(Theme.Spacing.lg)
+                }
+            }
+            .padding(.bottom, Theme.Spacing.md)
+            .frame(maxWidth: 420)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .fill(Theme.Color.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .stroke(Theme.Color.border, lineWidth: 1)
+                    )
+            )
+            .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
+            .padding(Theme.Spacing.lg)
+        }
+    }
+
+    private func snapshotSlotRow(slot: Int) -> some View {
+        let date = snapshotDates.indices.contains(slot) ? snapshotDates[slot] : nil
+        return snapshotRow(title: "存档 \(slot + 1)", date: date, slot: slot, allowsSave: true)
+    }
+
+    /// 「自动存档」伪槽位（auto.state）：只提供读 / 删，不提供存。
+    private func snapshotAutoRow(store: EmulatorSnapshotStore) -> some View {
+        let date = store.modificationDate(slot: EmulatorSnapshotStore.autoSlot)
+        return snapshotRow(title: "自动存档",
+                           date: date,
+                           slot: EmulatorSnapshotStore.autoSlot,
+                           allowsSave: false)
+    }
+
+    private func snapshotRow(title: String, date: Date?, slot: Int, allowsSave: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textPrimary)
+                Text(date.map { Self.snapshotDateFormatter.string(from: $0) } ?? "空")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.Color.textSecondary)
+            }
+            Spacer(minLength: 0)
+            if allowsSave {
+                snapshotAction("存", enabled: true) { saveSnapshot(slot: slot) }
+            }
+            snapshotAction("读", enabled: date != nil) { loadSnapshot(slot: slot) }
+            snapshotAction("删", enabled: date != nil) { deleteSnapshot(slot: slot) }
+        }
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.vertical, Theme.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                .fill(Theme.Color.surfaceAlt)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                        .stroke(Theme.Color.border, lineWidth: 1)
+                )
+        )
+    }
+
+    private func snapshotAction(_ title: String,
+                                enabled: Bool,
+                                action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(enabled ? Theme.Color.textPrimary : Theme.Color.textSecondary)
+                .frame(width: 34, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                        .fill(Theme.Color.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                                .stroke(Theme.Color.border, lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.45)
+    }
+
+    private static let snapshotDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm:ss"
+        return formatter
+    }()
+
     // MARK: - 顶栏
 
     private var topBar: some View {
         VStack(spacing: 0) {
             HStack(spacing: Theme.Spacing.sm) {
                 Button {
+                    autoSaveSnapshot()
                     state.stopPlayingROM()
                 } label: {
                     HStack(spacing: 4) {
@@ -212,6 +495,9 @@ struct EmulatorView: View {
                 }
 
                 Spacer()
+
+                speedButton
+                snapshotButton
 
                 Button {
                     togglePause()
@@ -362,6 +648,57 @@ final class EmulatorFrameSource: NSObject, ObservableObject {
             return   // 核心还没跑出新帧，画面保持不动
         }
         image = next
+    }
+}
+
+// MARK: - 即时存档落盘
+
+/// 即时存档的落盘目录：Documents/States/<ROM identifier>/，每个槽一个文件
+/// （slot-0.state…slot-3.state），另有一份退出时写的 auto.state。
+/// 只做最朴素的读写；目录不存在时惰性创建。
+final class EmulatorSnapshotStore {
+    /// 「自动存档」用的伪槽号
+    static let autoSlot = -1
+    /// 手动槽位数量
+    static let slotCount = 4
+
+    private let directory: URL
+
+    init(romIdentifier: String) {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        directory = documents
+            .appendingPathComponent("States", isDirectory: true)
+            .appendingPathComponent(romIdentifier, isDirectory: true)
+    }
+
+    private func fileURL(slot: Int) -> URL {
+        directory.appendingPathComponent(slot == Self.autoSlot ? "auto.state" : "slot-\(slot).state")
+    }
+
+    func modificationDate(slot: Int) -> Date? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL(slot: slot).path) else {
+            return nil
+        }
+        return attributes[.modificationDate] as? Date
+    }
+
+    @discardableResult
+    func write(_ data: Data, slot: Int) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: fileURL(slot: slot), options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func read(slot: Int) -> Data? {
+        try? Data(contentsOf: fileURL(slot: slot))
+    }
+
+    func delete(slot: Int) {
+        try? FileManager.default.removeItem(at: fileURL(slot: slot))
     }
 }
 

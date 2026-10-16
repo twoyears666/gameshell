@@ -561,6 +561,33 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     }
 }
 
+#pragma mark 即时存档（走核心自带的 libretro 序列化）
+
+/// 取一份即时存档。核心按当前卡带算出状态尺寸（retro_serialize_size
+/// 返回 Mesen-S 的 _saveStateSize），我们按这个尺寸要一块缓冲，让核心写进来。
+- (nullable NSData *)copySaveState {
+    if (!_loaded) {
+        return nil;
+    }
+    size_t size = retro_serialize_size();
+    if (size == 0) {
+        return nil;
+    }
+    NSMutableData *data = [NSMutableData dataWithLength: size];
+    if (!retro_serialize(data.mutableBytes, size)) {
+        return nil;
+    }
+    return data;
+}
+
+/// 把状态读回（核心内部按自己的 SaveStateManager 格式解析）。
+- (BOOL)restoreSaveState:(NSData *)data {
+    if (!_loaded || data.length == 0) {
+        return NO;
+    }
+    return retro_unserialize(data.bytes, (size_t)data.length);
+}
+
 #pragma mark 电池存档（核心不落盘，这里补上）
 
 /// 把核心的 SRAM 原样拷一份出来；这个卡带没有电池备份时返回 nil。

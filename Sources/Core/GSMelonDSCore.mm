@@ -622,6 +622,33 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
                                        stride: rowBytes];
 }
 
+#pragma mark 即时存档（走核心自带的 libretro 序列化）
+
+/// 取一份即时存档。melonDS 的 retro_serialize_size 只在 DS 模式下返回非 0；
+/// DSi 模式核心明确不支持即时存档（它会打 warn 并返回 0），此时我们如实返回 nil，
+/// 由 UI 提示「这个模式下不能存/读档」。
+- (nullable NSData *)copySaveState {
+    if (!_loaded) {
+        return nil;
+    }
+    size_t size = retro_serialize_size();
+    if (size == 0) {
+        return nil;
+    }
+    NSMutableData *data = [NSMutableData dataWithLength: size];
+    if (!retro_serialize(data.mutableBytes, size)) {
+        return nil;
+    }
+    return data;
+}
+
+- (BOOL)restoreSaveState:(NSData *)data {
+    if (!_loaded || data.length == 0) {
+        return NO;
+    }
+    return retro_unserialize(data.bytes, (size_t)data.length);
+}
+
 #pragma mark 音频
 
 - (size_t)handleAudioFrames:(const int16_t *)data frames:(size_t)frames {

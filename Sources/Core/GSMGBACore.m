@@ -42,8 +42,10 @@
 #import <mgba/core/core.h>
 #import <mgba/core/config.h>
 #import <mgba/core/interface.h>
+#import <mgba/core/serialize.h>   // mCoreSaveStateNamed / SAVESTATE_*
 #import <mgba-util/audio-buffer.h>
 #import <mgba-util/image.h>
+#import <mgba-util/vfs.h>          // VFileMemChunk / VFileFromConstMemory
 
 /// 视频缓冲固定按最大尺寸分配：GBA 是 240x160，GB/GBC 是 160x144
 static const unsigned kGSMGBAVideoStride = 240;
@@ -54,6 +56,11 @@ static const unsigned kGSMGBAVideoHeightMax = 160;
 static const size_t kGSMGBAInternalAudioSamples = 1024;
 /// 一次从 mGBA 缓冲里最多取多少采样帧
 static const size_t kGSMGBAAudioDrainFrames = 2048;
+
+/// 即时存档要包含哪些区块。取「电池存档 + 实时时钟」，与 mGBA 自己的
+/// rewind 功能（src/core/rewind.c 的 mCoreRewindAppend）用的是同一组 flag；
+/// 刻意不含截图 / 元数据（那些是给「存档缩略图」用的，我们不需要）。
+static const int kGSMGBASaveStateFlags = SAVESTATE_SAVEDATA | SAVESTATE_RTC;
 
 #pragma mark - 基础类型
 
@@ -297,6 +304,53 @@ static void _GSMGBAAudioRateChanged(struct mAVStream *stream, unsigned rate) {
 	}
 	// GSButton 的位序刻意与 mGBA 的 GBAKey / GBKey 对齐，可以直接传
 	_core->setKeys(_core, (uint32_t)mask);
+}
+
+#pragma mark 即时存档
+
+/// 取一份即时存档。用 VFileMemChunk 承接核心写出的状态 —— 它是一块会自动增长的
+/// 匿名内存文件，写完再 map 出来拷成 NSData（写法与 mGBA 的 rewind 一致）。
+- (nullable NSData *)copySaveState {
+	if (!_core || !_loaded) {
+		return nil;
+	}
+	struct VFile *vf = VFileMemChunk(NULL, 0);
+	if (!vf) {
+		return nil;
+	}
+	if (!mCoreSaveStateNamed(_core, vf, kGSMGBASaveStateFlags)) {
+		vf->close(vf);
+		return nil;
+	}
+	size_t size = (size_t)vf->size(vf);
+	if (size == 0) {
+		vf->close(vf);
+		return nil;
+	}
+	void *bytes = vf->map(vf, size, MAP_READ);
+	if (!bytes) {
+		vf->close(vf);
+		return nil;
+	}
+	NSData *data = [NSData dataWithBytes: bytes length: size];
+	vf->unmap(vf, bytes, size);
+	vf->close(vf);
+	return data;
+}
+
+/// 读回时用 VFileFromConstMemory 包住 NSData 的字节。flag 必须与写入时一致，
+/// 否则核心会按另一套区块布局去读，长度对不上就会失败。
+- (BOOL)restoreSaveState:(NSData *)data {
+	if (!_core || !_loaded || data.length == 0) {
+		return NO;
+	}
+	struct VFile *vf = VFileFromConstMemory(data.bytes, (size_t)data.length);
+	if (!vf) {
+		return NO;
+	}
+	bool ok = mCoreLoadStateNamed(_core, vf, kGSMGBASaveStateFlags);
+	vf->close(vf);
+	return ok;
 }
 
 #pragma mark 音频（由 mGBA 在自己的音频线程里回调进来）

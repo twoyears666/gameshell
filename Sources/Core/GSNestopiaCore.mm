@@ -42,6 +42,7 @@
 
 #include <fstream>
 #include <new>
+#include <sstream>
 
 /// NES 画面的固定尺寸（Nestopia 的 NES 输出就是 256x240；不做 NTSC 滤波）
 static const unsigned kGSNestopiaVideoWidth = Nes::Core::Video::Output::WIDTH;   // 256
@@ -376,6 +377,38 @@ struct GSNestopiaContext {
     if (_buttonMask & GSButtonLeft)   { buttons |= Nes::Api::Input::Controllers::Pad::LEFT; }
     if (_buttonMask & GSButtonRight)  { buttons |= Nes::Api::Input::Controllers::Pad::RIGHT; }
     return buttons;
+}
+
+#pragma mark 即时存档
+
+/// 取一份即时存档。Nestopia 的 Api::Machine 支持「把状态写进一个 ostream」，
+/// 这里用 std::stringstream 承接，再拷成 NSData。
+/// 用 NO_COMPRESSION：存档只在自己进程里存取，省那点体积不值得额外解压路径。
+- (nullable NSData *)copySaveState {
+    if (!_context || !_context->emulator || !_loaded) {
+        return nil;
+    }
+    Nes::Api::Machine machine(*_context->emulator);
+    std::stringstream stream;
+    if (NES_FAILED(machine.SaveState(stream, Nes::Api::Machine::NO_COMPRESSION))) {
+        return nil;
+    }
+    std::string state = stream.str();
+    if (state.empty()) {
+        return nil;
+    }
+    return [NSData dataWithBytes: state.data() length: state.size()];
+}
+
+/// 把状态读回。LoadState 只接受同一核心、同一版本写出的数据。
+- (BOOL)restoreSaveState:(NSData *)data {
+    if (!_context || !_context->emulator || !_loaded || data.length == 0) {
+        return NO;
+    }
+    Nes::Api::Machine machine(*_context->emulator);
+    std::stringstream stream;
+    stream.write((const char *)data.bytes, (std::streamsize)data.length);
+    return !NES_FAILED(machine.LoadState(stream));
 }
 
 #pragma mark 电池存档

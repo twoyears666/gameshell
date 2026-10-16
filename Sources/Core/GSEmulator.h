@@ -120,6 +120,14 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 @optional
 - (void)setTouchPoint:(CGPoint)point active:(BOOL)active NS_SWIFT_NAME(setTouchPoint(_:active:));
 
+/// 即时存档（可选）。只有支持存档的核心才实现这两个方法；宿主用
+/// respondsToSelector: 判定支持与否，不支持就如实告诉用户「这个核心不支持」。
+/// copySaveState 返回一份自包含的状态数据（自带尺寸信息，可直接落盘）；
+/// restoreSaveState: 只接受同一核心、同一版本产生的数据。
+@optional
+- (nullable NSData *)copySaveState NS_SWIFT_NAME(copySaveState());
+- (BOOL)restoreSaveState:(NSData *)data NS_SWIFT_NAME(restoreSaveState(_:));
+
 @end
 
 #pragma mark - 会话
@@ -157,6 +165,23 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 /// 触摸屏（NDS 下屏等）：point 是触摸区内的归一化坐标（0–1），active 表示是否按下。
 /// 不支持触摸的核心会忽略；只写「待生效」状态，真正下发在模拟线程里（线程安全）。
 - (void)setTouchPoint:(CGPoint)point active:(BOOL)active NS_SWIFT_NAME(setTouchPoint(_:active:));
+
+// MARK: - 速度 / 即时存档
+
+/// 模拟速度倍率，默认 1.0，取值会被夹紧到 0.25–4.0。
+/// 说明：核心每次仍只跑「一帧」，宿主是靠改帧节奏实现变速的 ——
+/// 倍率 > 1 时每秒跑更多帧（游戏变快），同时静音（见 GSEmulator.m 的注释）。
+@property (nonatomic, assign) double emulationSpeed;
+
+/// 当前核心是否支持即时存档（核心实现了存档接口且已经载入 ROM）
+@property (nonatomic, assign, readonly) BOOL supportsSaveStates;
+
+/// 取一份即时存档。主线程调用；内部把请求贴给模拟线程执行、等它做完再返回（线程安全）。
+/// 不支持、未启动或失败时返回 nil。
+- (nullable NSData *)copySnapshot;
+
+/// 恢复一份即时存档。同上走模拟线程；成功返回 YES。
+- (BOOL)restoreSnapshot:(NSData *)data;
 
 // MARK: - 音频（由 Swift 侧的 AVAudioEngine 拉取）
 

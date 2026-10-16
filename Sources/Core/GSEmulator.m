@@ -247,6 +247,8 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 + (nullable id<GSEmulatorCore>)createCoreForSystem:(GSSystem)system;
 /// 已经接入的系统 → 核心名。编译期就能确定，只算一次，供 UI 高频查询（不实例化核心）
 + (NSDictionary<NSNumber *, NSString *> *)coreNamesBySystem;
+/// 把一次即时存档请求贴给模拟线程并等它做完（超时返回 NO）
+- (BOOL)postSnapshotRequestRestoring:(BOOL)isRestore data:(nullable NSData *)data;
 @end
 
 @implementation GSEmulatorSession {
@@ -280,6 +282,19 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     CGPoint _pendingTouchPoint;
     BOOL _pendingTouchActive;
     BOOL _hasPendingTouch;
+
+    // 速度倍率（主线程写、模拟线程读，默认 1.0）
+    volatile double _emulationSpeed;
+
+    // 即时存档：主线程贴请求 → 模拟线程执行 → 信号量回传。
+    // 状态数据读写必须与 runFrame 在同一线程，所以整条链路都收在模拟线程里。
+    os_unfair_lock _snapshotLock;
+    dispatch_semaphore_t _snapshotDone;
+    BOOL _hasSnapshotRequest;
+    BOOL _snapshotIsRestore;
+    NSData *_snapshotRequestData;
+    NSData *_snapshotResultData;
+    BOOL _snapshotResultOK;
 }
 
 - (instancetype)initWithROM:(GSROM *)rom {
@@ -289,7 +304,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         _systemInfo = [GSSystemRegistry infoForSystem: rom.system];
         _frameLock = OS_UNFAIR_LOCK_INIT;
         _audioLock = OS_UNFAIR_LOCK_INIT;
+        _snapshotLock = OS_UNFAIR_LOCK_INIT;
         _audioRing = calloc(GSAudioRingCapacity, sizeof(int16_t));
+        _emulationSpeed = 1.0;
 
         _core = [GSEmulatorSession createCoreForSystem: rom.system];
         if (_core == nil) {
@@ -443,6 +460,8 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 
     _running = YES;
     _loopExitSemaphore = dispatch_semaphore_create(0);
+    _snapshotDone = dispatch_semaphore_create(0);
+    _hasSnapshotRequest = NO;
     _emulationThread = [[NSThread alloc] initWithTarget: self
                                                selector: @selector(emulationLoop)
                                                  object: nil];
@@ -466,6 +485,7 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     _emulationThread = nil;
     _started = NO;
     _hasPendingTouch = NO;
+    _hasSnapshotRequest = NO;
 
     if (_core) {
         [_core unloadROM];
@@ -487,13 +507,42 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     if (fps < 1.0) {
         fps = 60.0;
     }
-    const uint64_t frameIntervalNs = (uint64_t)(1000000000.0 / fps);
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     uint64_t nextFrameNs = (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
 
     while (_running) {
+        // 速度每一轮重算一次：运行中改档位能在下一帧立刻生效。
+        // 帧节奏 = 核心帧率 × 速度倍率，于是「每秒跑多少帧」随倍率缩放
+        // （核心每次仍只跑一帧，所以画面/声音的内容不受影响，只是快慢不同）。
+        double speed = _emulationSpeed;
+        if (speed < 0.25) {
+            speed = 0.25;
+        } else if (speed > 4.0) {
+            speed = 4.0;
+        }
+        const uint64_t frameIntervalNs = (uint64_t)(1000000000.0 / (fps * speed));
+
         @autoreleasepool {
+            // 即时存档命令：有意放在 paused 判断**之外** —— 暂停时也要能存/读档。
+            // 核心的状态无关 runFrame，但同样只能在模拟线程里碰（单线程假设）。
+            if (_hasSnapshotRequest) {
+                os_unfair_lock_lock(&_snapshotLock);
+                if (_snapshotIsRestore) {
+                    _snapshotResultOK = [_core respondsToSelector: @selector(restoreSaveState:)]
+                        ? [_core restoreSaveState: _snapshotRequestData] : NO;
+                } else {
+                    _snapshotResultData = [_core respondsToSelector: @selector(copySaveState)]
+                        ? [_core copySaveState] : nil;
+                }
+                _snapshotRequestData = nil;
+                _hasSnapshotRequest = NO;
+                os_unfair_lock_unlock(&_snapshotLock);
+                if (_snapshotDone) {
+                    dispatch_semaphore_signal(_snapshotDone);
+                }
+            }
+
             if (!self.paused) {
                 [_core setButtonMask: _pendingButtonMask];
                 // 触摸只在核心真的实现了接口时下发（respondsToSelector: 守卫），
@@ -525,6 +574,67 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     if (_loopExitSemaphore) {
         dispatch_semaphore_signal(_loopExitSemaphore);
     }
+}
+
+#pragma mark 速度 / 即时存档
+
+- (double)emulationSpeed { return _emulationSpeed; }
+
+- (void)setEmulationSpeed:(double)speed {
+    if (speed < 0.25) {
+        speed = 0.25;
+    } else if (speed > 4.0) {
+        speed = 4.0;
+    }
+    _emulationSpeed = speed;
+}
+
+- (BOOL)supportsSaveStates {
+    return _core != nil && [_core respondsToSelector: @selector(copySaveState)];
+}
+
+/// 把一次存档请求贴给模拟线程并等它做完。YES 表示模拟线程确实执行了这次请求。
+- (BOOL)postSnapshotRequestRestoring:(BOOL)isRestore data:(nullable NSData *)data {
+    if (!_started || !_running || _snapshotDone == NULL || !self.supportsSaveStates) {
+        return NO;
+    }
+
+    os_unfair_lock_lock(&_snapshotLock);
+    _snapshotIsRestore = isRestore;
+    _snapshotRequestData = data;
+    _snapshotResultData = nil;
+    _snapshotResultOK = NO;
+    _hasSnapshotRequest = YES;
+    os_unfair_lock_unlock(&_snapshotLock);
+
+    // 兜底超时：模拟线程万一停摆，不要一直挂着主线程（UI）。
+    long timedOut = dispatch_semaphore_wait(_snapshotDone,
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)));
+    if (timedOut != 0) {
+        os_unfair_lock_lock(&_snapshotLock);
+        _hasSnapshotRequest = NO;
+        _snapshotRequestData = nil;
+        os_unfair_lock_unlock(&_snapshotLock);
+        return NO;
+    }
+    return YES;
+}
+
+- (nullable NSData *)copySnapshot {
+    if (![self postSnapshotRequestRestoring: NO data: nil]) {
+        return nil;
+    }
+    return _snapshotResultData;
+}
+
+- (BOOL)restoreSnapshot:(NSData *)data {
+    if (data.length == 0) {
+        return NO;
+    }
+    if (![self postSnapshotRequestRestoring: YES data: data]) {
+        return NO;
+    }
+    return _snapshotResultOK;
 }
 
 #pragma mark 输入
@@ -604,6 +714,12 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size) {
 
 - (void)coreDidProduceAudioSamples:(const int16_t *)samples count:(size_t)count {
     if (samples == NULL || count == 0 || _audioRing == NULL) {
+        return;
+    }
+    // 加速（> 1×）时静音：核心每秒产出的音频量随速度线性增长，
+    // 播放端消耗不了，任其写入只会把环形缓冲塞满 + 变调。
+    // 直接不写，readAudioInto: 读不到就补静音（见该方法的实现）。
+    if (_emulationSpeed > 1.001) {
         return;
     }
 
