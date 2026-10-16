@@ -46,6 +46,12 @@
 //  并自动改用 FreeBIOS（VerifyDSBIOS 返回 Load_OK），NDS 也会自行合成固件。
 //  又因为我们把 melonds_boot_directly 答成 enabled，不会进固件菜单，直接进游戏。
 //
+//  触摸：把 melonds_touch_mode 答成 Touch，核心便走 libretro 的 RETRO_DEVICE_POINTER
+//  （见 input.cpp 的 TouchMode::Touch 分支）。宿主经 setTouchPoint:active: 传「DS 下屏内的
+//  归一化坐标（0–1）」，本文件换算成 pointer 的 int16 坐标，换算依据见该方法注释。
+//  特别注意 pointer 的 ident（X=0 / Y=1 / PRESSED=2）与 JOYPAD 的 B(0) / Y(1) / SELECT(2)
+//  数值撞车，所以 inputStateForPort: 必须先判 device 再判 ident。
+//
 //  符号前缀：本文件必须在 libretro.h 之前 include gs_symbol_prefix.h ——
 //  原因见该文件顶部注释（同一 App 里还静态链接了另一个 libretro 核心 Mesen-S）。
 //
@@ -73,6 +79,7 @@
 // 对应的搜索路径写在 project.yml 的 HEADER_SEARCH_PATHS。
 #include "libretro-common/include/libretro.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -153,10 +160,16 @@ static bool gs_retro_lookup_variable(struct retro_variable *variable) {
         variable->value = ([GSJIT probeStatus] == GSJITStatusEnabled) ? "enabled" : "disabled";
         return true;
     }
+    if (strcmp(key, "melonds_touch_mode") == 0) {
+        // 触屏走 libretro 的 pointer 设备（input.cpp 的 TouchMode::Touch 分支），
+        // 由宿主经 setTouchPoint:active: 驱动。核心默认是 Disabled，必须显式答 Touch。
+        variable->value = "Touch";
+        return true;
+    }
 
     // 特别注意 melonds_screen_gap：核心会拿 var.value 去 std::stoi，
     // 一旦我们返回 true 却给不出字符串就会炸，所以这里必须落到 return false。
-    // 其余（touch_mode / threaded_renderer / mic_input / audio_bitrate /
+    // 其余（threaded_renderer / mic_input / audio_bitrate /
     // audio_interpolation / use_fw_settings / hybrid_* / dsi_sdcard…）同理交给默认值。
     return false;
 }
@@ -302,6 +315,13 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     BOOL _loaded;
 
     GSButton _buttonMask;
+
+    /// 触摸屏（DS 下屏）状态。坐标是 libretro pointer 的 int16 表示
+    /// （0x8000 为缓冲中心偏移；换算见 setTouchPoint:active: 的注释）。
+    int16_t _touchPointerX;
+    int16_t _touchPointerY;
+    /// 手指当前是否按在触摸屏上
+    BOOL _touchActive;
 
     /// 核心要的两个目录（它只读不写这对指针，所以由本对象持有、shutdown 里释放）
     char *_systemDirCString;
@@ -449,6 +469,9 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     }
 
     _buttonMask = 0;
+    _touchActive = NO;
+    _touchPointerX = 0;
+    _touchPointerY = 0;
     return YES;
 }
 
@@ -497,6 +520,9 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 
     _romData = nil;
     _buttonMask = 0;
+    _touchActive = NO;
+    _touchPointerX = 0;
+    _touchPointerY = 0;
     _delegate = nil;
 }
 
@@ -513,6 +539,35 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 
 - (void)setButtonMask:(GSButton)mask {
     _buttonMask = mask;
+}
+
+/// 触摸屏（DS 下屏）。point 是**下屏内的归一化坐标（0–1）**，本方法把它换算成
+/// libretro pointer 的 int16 坐标（0x8000 为缓冲中心偏移）。
+///
+/// 换算依据（见 input.cpp 的 TouchMode::Touch 分支 + screenlayout.cpp 的 TopBottom 分支）：
+///   核心侧：x = (pointer_x + 0x8000) * buffer_width  / 0x10000
+///           y = (pointer_y + 0x8000) * buffer_height / 0x10000
+///   我们钉死 Top/Bottom 且不答 melonds_screen_gap（gap = 0），于是：
+///   buffer 256x384，下屏在缓冲下半 → touch_offset = (0, 192)、screen 尺寸 256x192。
+///   要让触摸落到下屏内点 (nx, ny)（nx/ny ∈ [0,1]）：
+///     buffer_x = 0 + nx*256    → pointer_x = nx * 0x10000 - 0x8000
+///     buffer_y = 192 + ny*192  → pointer_y = ny * 0x8000   （因 384 = 192*2）
+///   Hybrid 布局另有一个 touch_scale，我们不用 Hybrid，故不涉及。
+- (void)setTouchPoint:(CGPoint)point active:(BOOL)active {
+    _touchActive = active;
+
+    double nx = point.x;
+    double ny = point.y;
+    if (nx < 0.0) { nx = 0.0; } else if (nx > 1.0) { nx = 1.0; }
+    if (ny < 0.0) { ny = 0.0; } else if (ny > 1.0) { ny = 1.0; }
+
+    long pointerX = lrint((nx - 0.5) * 65536.0);
+    long pointerY = lrint(ny * 32768.0);
+    if (pointerX < -32768) { pointerX = -32768; } else if (pointerX > 32767) { pointerX = 32767; }
+    if (pointerY < -32768) { pointerY = -32768; } else if (pointerY > 32767) { pointerY = 32767; }
+
+    _touchPointerX = (int16_t)pointerX;
+    _touchPointerY = (int16_t)pointerY;
 }
 
 #pragma mark 画面
@@ -584,7 +639,21 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
                       device:(unsigned)device
                        index:(unsigned)index
                         ident:(unsigned)ident {
-    // 只接 0 号口的标准 DS 手柄；触摸屏 / 麦克风 / 换屏 / 合盖一律回 0
+    // 先判 device 再判 ident：pointer 的 ident（X=0 / Y=1 / PRESSED=2）
+    // 与 JOYPAD 的 B(0) / Y(1) / SELECT(2) 数值撞车，顺序不能反。
+    if (device == RETRO_DEVICE_POINTER) {
+        if (port != 0 || index != 0) {
+            return 0;
+        }
+        switch (ident) {
+            case RETRO_DEVICE_ID_POINTER_PRESSED: return _touchActive ? 1 : 0;
+            case RETRO_DEVICE_ID_POINTER_X:       return _touchPointerX;
+            case RETRO_DEVICE_ID_POINTER_Y:       return _touchPointerY;
+            default:                              return 0;
+        }
+    }
+
+    // 只接 0 号口的标准 DS 手柄；麦克风 / 换屏 / 合盖一律回 0
     if (port != 0 || device != RETRO_DEVICE_JOYPAD || index != 0) {
         return 0;
     }

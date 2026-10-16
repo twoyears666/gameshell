@@ -274,6 +274,12 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     os_unfair_lock _audioLock;
 
     GSButton _pendingButtonMask;
+
+    // 触摸屏（NDS 下屏）：与按键同理 —— 主线程只写「待生效」状态，
+    // 模拟线程消费后、且核心实现了触摸接口时才下发。
+    CGPoint _pendingTouchPoint;
+    BOOL _pendingTouchActive;
+    BOOL _hasPendingTouch;
 }
 
 - (instancetype)initWithROM:(GSROM *)rom {
@@ -459,6 +465,7 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     }
     _emulationThread = nil;
     _started = NO;
+    _hasPendingTouch = NO;
 
     if (_core) {
         [_core unloadROM];
@@ -489,6 +496,12 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         @autoreleasepool {
             if (!self.paused) {
                 [_core setButtonMask: _pendingButtonMask];
+                // 触摸只在核心真的实现了接口时下发（respondsToSelector: 守卫），
+                // 避免对 mGBA / Nestopia 这类不触摸的核心误发消息。
+                if (_hasPendingTouch && [_core respondsToSelector: @selector(setTouchPoint:active:)]) {
+                    [_core setTouchPoint: _pendingTouchPoint active: _pendingTouchActive];
+                    _hasPendingTouch = NO;
+                }
                 [_core runFrame];
             } else {
                 usleep(8000);
@@ -518,6 +531,14 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 
 - (void)setButtonMask:(GSButton)mask {
     _pendingButtonMask = mask;
+}
+
+/// 触摸屏（NDS 下屏）。point 是触摸区内的归一化坐标（0–1）。
+/// 与 setButtonMask: 同一套「主线程写、模拟线程读」模式：只更新待生效值。
+- (void)setTouchPoint:(CGPoint)point active:(BOOL)active {
+    _pendingTouchPoint = point;
+    _pendingTouchActive = active;
+    _hasPendingTouch = YES;
 }
 
 #pragma mark 画面

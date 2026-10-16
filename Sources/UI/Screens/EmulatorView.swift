@@ -85,12 +85,12 @@ struct EmulatorView: View {
                 if landscape {
                     ZStack {
                         screenLayer(viewport: screenArea)
-                        padLayer(area: padArea)
+                        padLayer(area: padArea, session: session)
                     }
                 } else {
                     VStack(spacing: 0) {
                         screenLayer(viewport: screenArea)
-                        padLayer(area: padArea)
+                        padLayer(area: padArea, session: session)
                     }
                 }
             }
@@ -128,10 +128,22 @@ struct EmulatorView: View {
         .frame(width: viewport.width, height: viewport.height)
     }
 
-    private func padLayer(area: CGSize) -> some View {
-        VirtualGamepad(size: area, mapping: state.keyMapping) { mask in
-            input.setTouchMask(mask)
-        }
+    private func padLayer(area: CGSize, session: GSEmulatorSession) -> some View {
+        VirtualGamepad(size: area,
+                       mapping: state.keyMapping,
+                       systemIdentifier: session.systemInfo.identifier,
+                       onMaskChange: { mask in
+                           input.setTouchMask(mask)
+                       },
+                       onTouch: { point, active in
+                           // 触摸屏（NDS 下屏）：把触摸区内的归一化坐标交给核心
+                           session.setTouchPoint(point, active: active)
+                       },
+                       onMenu: {
+                           // NDS 的 Menu 键等价顶栏的暂停按钮
+                           isPaused.toggle()
+                           session.paused = isPaused
+                       })
         .frame(width: area.width, height: area.height)
     }
 

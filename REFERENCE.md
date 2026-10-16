@@ -69,8 +69,8 @@
 | **「游戏库」方块行**（URL 条目 + 模拟器 ROM 混排，一行横向滚动） | ✅ 已实现 | `HomeView.LibraryTileRow` + `LibraryItem.swift` |
 | **URL 条目导入本地图标**（「添加」里选图片，写入沙盒 `Documents/Icons/`） | ✅ 已实现 | `AddGameForm.swift` + `GSIconStore` |
 | **模拟器 ROM 自动抓取官方封面**（libretro-thumbnails `Named_Boxarts`，命中即缓存到 `Documents/Covers/`） | ⚠️ 待实机验证（联网抓取，本机无 iOS SDK，端到端未验证） | `GSCoverFetcher` + `AppState.refreshROMCovers` |
-| **设置页：三端键位**（触屏缩放 / 透明度 / 按键簇显隐、键盘、手柄；改完即生效并持久化） | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
-| **设置页：触屏布局编辑器**（拖拽移动每一簇、双指或滑杆调整大小；入口**只在设置页**，游玩界面不可编辑） | ✅ 已实现 | `TouchLayoutEditor.swift` + `VirtualControls.swift` + `GSKeyMapping` |
+| **设置页：三端键位**（触屏 / 键盘 / 手柄；改完即生效并持久化）；**触屏按系统分别配置**（先选系统，再调缩放 / 透明度 / 按键簇显隐） | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
+| **设置页：触屏布局编辑器**（**每个系统一套独立布局**；拖拽移动每一簇、双指或滑杆调整大小；入口**只在设置页**，游玩界面不可编辑） | ✅ 已实现 | `TouchLayoutEditor.swift` + `VirtualControls.swift` + `GSKeyMapping` |
 | 模拟器内三端按键转发（触屏虚拟手柄 + 硬件键盘 + 手柄 → 单一 `GSButton` 位掩码 → 核心） | ✅ 已实现 | `EmulatorInputCoordinator.swift` + `KeyboardCapture.swift` + `GSInputManager` |
 | 深链 `gameshell://home / open / play`（`search` 已移除，收到时提示） | ✅ 已实现 | `GSGameLauncher.m` + `GameshellApp.swift` + `AppState.handle(url:)` |
 | 自绘浮层（toast / confirm / 表单），**不使用系统弹窗** | ✅ 已实现 | `Sources/UI/Overlay/` |
@@ -85,8 +85,9 @@
 | **模拟器：SNES 实机模拟**（Mesen-S 静态链接进主二进制；XRGB8888 → RGBA8888 逐像素转换 + 可变分辨率重分配缓冲 + 32040Hz 交错立体声 + 宿主侧 SRAM 落盘） | ⚠️ **代码已写完、CI 编译链接通过，但尚未实机实测**（详见下方「诚实补一句」） | `Sources/Core/GSSnesCore.mm` + `Sources/Core/GSEmulator.m` |
 | **模拟器：NDS 实机模拟**（melonDS 静态链接进主二进制；RGBA 直出 + 交错立体声 + 核心自行落盘 .sav；库内同时编入 ARM64 dynarec 与解释器，运行时按 JIT 探测结果二选一） | ⚠️ **代码已写完、CI 编译链接通过，但尚未实机实测**（详见下方「诚实补一句」） | `Sources/Core/GSMelonDSCore.mm` + `Sources/Core/GSEmulator.m` |
 | **模拟器：画面输出**（核心出 RGBA8888 → CGImage，`CADisplayLink` 按屏幕刷新率取最新帧） | ✅ 已实现（iOS） | `GSEmulator.m` + `EmulatorView.EmulatorFrameSource` |
+| **模拟器：NDS 触摸输入**（虚拟手柄的下屏触摸区 → 归一化坐标 → `RETRO_DEVICE_POINTER` → melonDS `NDS::TouchScreen`；`melonds_touch_mode` 答为 Touch） | ⚠️ 代码已写完、CI 编译链接通过，**尚未实机实测** | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSEmulator.m` + `Sources/Core/GSMelonDSCore.mm` |
 | **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
-| **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R；每簇位置与大小由 `GSTouchClusterLayout` 归一化坐标决定，可在设置页调整） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSKeyMapping.m` |
+| **模拟器：自绘虚拟手柄**（**按键簇与默认布局按系统区分**：GB / GBC / NES 为十字键 + A / B + START / SELECT；GBA / SNES 加 L / R，SNES 为 A / B / X / Y 四键菱形；NDS 为四键菱形 + L / R + MENU + 下屏触摸区。每簇位置与大小由 `GSTouchClusterLayout` 归一化坐标决定，可在设置页调整） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSKeyMapping.m` |
 | **模拟器：ROM 并入游戏库**（统一方块行，卡片带系统徽标 / 封面）+ 设置页「核心接入状态表」 | ✅ 已实现（iOS） | `Sources/UI/Components/LibraryItem.swift` + `Sources/UI/Components/GameCard.swift` + `Sources/UI/Emulator/CoreStatusList.swift` |
 | **模拟器：JIT 能力探测**（真的去 `mmap(MAP_JIT)` 试探）+ TrollStore 探测 | ✅ 已实现 | `GSJIT`（`Sources/Core/GSEmulator.m`） |
 | **TrollStore 原生 JIT 自举**（带 `no-sandbox` 时，`__attribute__((constructor))` 抢在 `UIApplicationMain` 前 spawn 自身、子进程 `ptrace(PT_TRACE_ME)`，父子拿到 `CS_DEBUGGED` → `mmap(MAP_JIT)` 成立；照 Amethyst-iOS / UTM） | ⚠️ 代码已写完、CI 编译链接通过，**尚未实机验证**（本机无 iOS 工具链） | `Sources/Core/GSEmulator.m`（`GSJITBootstrapIfNeeded`） |
@@ -102,6 +103,7 @@
 > 因此它现在标的是 **⚠️ 待实机验证**，而不是 ✅。
 >
 > melonDS（NDS）同理：同样只有静态预检 + CI 编译链接验证，**尚未实机实测**，所以也只标 ⚠️。
+> 其中 **NDS 触摸**（下屏触摸区 → `RETRO_DEVICE_POINTER`）的坐标换算参照核心的 `input.cpp` / `screenlayout.cpp`，**同样未在真机上验证手感与落点精度**。
 
 ---
 

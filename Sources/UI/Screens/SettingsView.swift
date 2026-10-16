@@ -19,6 +19,8 @@ struct SettingsView: View {
     @StateObject private var capture = GSBindingCapture()
     /// 是否打开「触屏布局编辑器」覆盖层（入口只在设置页，游玩界面不提供）
     @State private var showsLayoutEditor = false
+    /// 布局编辑器正在编辑哪个系统（各系统各存一套布局）
+    @State private var layoutEditorSystem = "gba"
     #endif
 
     var body: some View {
@@ -28,7 +30,10 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     #if os(iOS)
-                    TouchSettingsCard(mapping: state.keyMapping) { showsLayoutEditor = true }
+                    TouchSettingsCard(mapping: state.keyMapping) { system in
+                        layoutEditorSystem = system
+                        showsLayoutEditor = true
+                    }
                     KeyboardSettingsCard(mapping: state.keyMapping, capture: capture)
                     GamepadSettingsCard(mapping: state.keyMapping, capture: capture)
                     CoreIntegrationCard()
@@ -54,7 +59,8 @@ struct SettingsView: View {
     private var layoutEditorLayer: some View {
         #if os(iOS)
         if showsLayoutEditor {
-            TouchLayoutEditor(mapping: state.keyMapping) { showsLayoutEditor = false }
+            TouchLayoutEditor(mapping: state.keyMapping,
+                              systemIdentifier: layoutEditorSystem) { showsLayoutEditor = false }
         }
         #endif
     }
@@ -339,30 +345,47 @@ private struct SettingsCard<Content: View>: View {
 
 private struct TouchSettingsCard: View {
     let mapping: GSKeyMapping
-    /// 打开布局编辑器（拖拽移动 / 调整大小）
-    let onEditLayout: () -> Void
+    /// 打开布局编辑器（拖拽移动 / 调整大小）；参数是要编辑的系统标识
+    let onEditLayout: (String) -> Void
 
     @State private var scale: CGFloat
     @State private var opacity: CGFloat
-    @State private var showDPad: Bool
-    @State private var showFace: Bool
-    @State private var showShoulders: Bool
-    @State private var showStartSelect: Bool
+    /// 当前在编辑哪个系统：各系统的按键簇集合、默认布局与显示开关都分开
+    @State private var systemIdentifier: String
 
-    init(mapping: GSKeyMapping, onEditLayout: @escaping () -> Void) {
+    init(mapping: GSKeyMapping, onEditLayout: @escaping (String) -> Void) {
         self.mapping = mapping
         self.onEditLayout = onEditLayout
         _scale = State(initialValue: mapping.touchScale)
         _opacity = State(initialValue: mapping.touchOpacity)
-        _showDPad = State(initialValue: mapping.touchShowDPad)
-        _showFace = State(initialValue: mapping.touchShowFace)
-        _showShoulders = State(initialValue: mapping.touchShowShoulders)
-        _showStartSelect = State(initialValue: mapping.touchShowStartSelect)
+        _systemIdentifier = State(initialValue: Self.defaultSystemIdentifier)
+    }
+
+    /// 默认编辑哪个系统：优先 GBA（最经典的布局），否则取第一个已接入的系统
+    private static var defaultSystemIdentifier: String {
+        let systems = GSSystemRegistry.integratedSystems()
+        if let gba = systems.first(where: { $0.identifier == "gba" }) {
+            return gba.identifier
+        }
+        return systems.first?.identifier ?? "gba"
+    }
+
+    private var systems: [GSSystemInfo] {
+        GSSystemRegistry.integratedSystems()
+    }
+
+    /// 当前系统有哪些按键簇
+    private var clusters: [GSTouchCluster] {
+        GSKeyMapping.touchClusters(forSystem: systemIdentifier)
+            .compactMap { GSTouchCluster(rawValue: $0.intValue) }
     }
 
     var body: some View {
-        SettingsCard(title: "触屏手柄", subtitle: "缩放、透明度、各按键簇是否显示，以及每簇的位置与大小") {
+        SettingsCard(title: "触屏手柄",
+                     subtitle: "缩放、透明度是全局的；各按键簇是否显示、位置与大小按系统分别保存") {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                systemPicker
+
                 slider(title: "缩放",
                        value: $scale,
                        range: 0.6...1.4,
@@ -377,16 +400,67 @@ private struct TouchSettingsCard: View {
                     mapping.touchOpacity = value
                 }
 
-                toggle(title: "显示十字键", isOn: $showDPad) { mapping.touchShowDPad = $0 }
-                toggle(title: "显示 A / B", isOn: $showFace) { mapping.touchShowFace = $0 }
-                toggle(title: "显示 L / R", isOn: $showShoulders) { mapping.touchShowShoulders = $0 }
-                toggle(title: "显示 START / SELECT", isOn: $showStartSelect) { mapping.touchShowStartSelect = $0 }
+                ForEach(clusters, id: \.rawValue) { cluster in
+                    toggle(title: "显示 \(GSKeyMapping.displayName(forCluster: cluster, system: systemIdentifier))",
+                           isOn: visibleBinding(cluster))
+                }
 
                 // 每簇的位置与大小（拖拽移动、双指或滑杆缩放）只在设置页的布局编辑器里调
-                PillButton(title: "编辑布局（拖动位置 / 调整大小）", style: .secondary, action: onEditLayout)
-                    .padding(.top, Theme.Spacing.xxs)
+                PillButton(title: "编辑布局（拖动位置 / 调整大小）", style: .secondary) {
+                    onEditLayout(systemIdentifier)
+                }
+                .padding(.top, Theme.Spacing.xxs)
             }
         }
+    }
+
+    /// 系统选择器：横排小胶囊，点一下切换正在编辑的系统
+    private var systemPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("正在编辑的系统")
+                .font(Theme.Font.chip)
+                .foregroundStyle(Theme.Color.textSecondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    ForEach(systems, id: \.identifier) { info in
+                        Button {
+                            systemIdentifier = info.identifier
+                        } label: {
+                            Text(info.shortName)
+                                .font(Theme.Font.chip)
+                                .foregroundStyle(systemIdentifier == info.identifier
+                                                 ? Theme.Color.background
+                                                 : Theme.Color.textPrimary)
+                                .padding(.horizontal, Theme.Spacing.sm)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                                        .fill(systemIdentifier == info.identifier
+                                              ? Theme.Color.accent
+                                              : Theme.Color.surface)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                                                .stroke(Theme.Color.border, lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 某簇的显示开关绑定：直接读写 GSKeyMapping（按系统），改完立即落盘
+    private func visibleBinding(_ cluster: GSTouchCluster) -> Binding<Bool> {
+        Binding(
+            get: { mapping.isClusterVisible(cluster, forSystem: systemIdentifier) },
+            set: { newValue in
+                mapping.setVisible(newValue, forCluster: cluster, system: systemIdentifier)
+                mapping.persist()
+            }
+        )
     }
 
     private func slider(title: String,
@@ -413,19 +487,13 @@ private struct TouchSettingsCard: View {
         }
     }
 
-    private func toggle(title: String,
-                        isOn: Binding<Bool>,
-                        apply: @escaping (Bool) -> Void) -> some View {
+    private func toggle(title: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
             Text(title)
                 .font(Theme.Font.body)
                 .foregroundStyle(Theme.Color.textPrimary)
         }
         .tint(Theme.Color.accent)
-        .onChange(of: isOn.wrappedValue) { newValue in
-            apply(newValue)
-            mapping.persist()
-        }
     }
 }
 

@@ -89,7 +89,7 @@ static NSString *GSGamepadLabel(NSString *identifier) {
     return map[identifier] ?: identifier;
 }
 
-#pragma mark - 按键簇布局
+#pragma mark - 按键簇
 
 /// 每个按键簇的稳定键名（持久化用）
 static NSString *GSTouchClusterKey(GSTouchCluster cluster) {
@@ -99,33 +99,108 @@ static NSString *GSTouchClusterKey(GSTouchCluster cluster) {
         case GSTouchClusterL:           return @"L";
         case GSTouchClusterR:           return @"R";
         case GSTouchClusterStartSelect: return @"startSelect";
+        case GSTouchClusterMenu:        return @"menu";
+        case GSTouchClusterTouchScreen: return @"touchScreen";
     }
     return @"";
 }
 
+/// 全部按键簇（按 rawValue 顺序，持久化 / 迁移遍历用）
+static const GSTouchCluster GSTouchClusterAll[] = {
+    GSTouchClusterDPad, GSTouchClusterFace, GSTouchClusterL, GSTouchClusterR,
+    GSTouchClusterStartSelect, GSTouchClusterMenu, GSTouchClusterTouchScreen,
+};
+
 static GSTouchCluster GSTouchClusterFromKey(NSString *key) {
-    for (NSNumber *number in [GSKeyMapping touchClusters]) {
-        GSTouchCluster cluster = (GSTouchCluster)number.integerValue;
-        if ([GSTouchClusterKey(cluster) isEqualToString: key]) {
-            return cluster;
+    for (size_t index = 0; index < sizeof(GSTouchClusterAll) / sizeof(GSTouchClusterAll[0]); index++) {
+        if ([GSTouchClusterKey(GSTouchClusterAll[index]) isEqualToString: key]) {
+            return GSTouchClusterAll[index];
         }
     }
     return GSTouchClusterDPad;
 }
 
-/// 各按键簇的内置默认布局（归一化中心 + 缩放）。
-/// 数值直接取自 Delta「Standard GBA」皮肤的 iPhone 横屏布局，按其画布（667×375）归一化：
-/// 十字键左下、A/B 右下、L/R 顶部两角、START/SELECT 底部居中——与 Delta 一致。
-static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
+/// 解析一份「cluster 键名 → {x,y,scale}」字典
+static NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *GSParseLayoutBucket(NSDictionary *source) {
+    NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *bucket = [NSMutableDictionary dictionary];
+    for (id key in source) {
+        id entry = source[key];
+        if (![key isKindOfClass: [NSString class]] || ![entry isKindOfClass: [NSDictionary class]]) {
+            continue;
+        }
+        NSDictionary *values = entry;
+        GSTouchClusterLayout *layout = [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
+        if ([values[@"x"] isKindOfClass: [NSNumber class]]) { layout.x = [values[@"x"] doubleValue]; }
+        if ([values[@"y"] isKindOfClass: [NSNumber class]]) { layout.y = [values[@"y"] doubleValue]; }
+        if ([values[@"scale"] isKindOfClass: [NSNumber class]]) { layout.scale = [values[@"scale"] doubleValue]; }
+        bucket[@(GSTouchClusterFromKey(key))] = layout;
+    }
+    return bucket;
+}
+
+#pragma mark - 各系统的按键簇 profile
+
+/// 系统标识规整（小写）；nil / 空归成空串
+static NSString *GSSystemKey(NSString *systemIdentifier) {
+    return [(systemIdentifier ?: @"") lowercaseString];
+}
+
+/// 各系统的按键簇集合
+static NSArray<NSNumber *> *GSClustersForSystem(NSString *systemIdentifier) {
+    NSString *system = GSSystemKey(systemIdentifier);
+    if ([system isEqualToString: @"nds"]) {
+        return @[@(GSTouchClusterDPad), @(GSTouchClusterFace),
+                 @(GSTouchClusterL), @(GSTouchClusterR), @(GSTouchClusterStartSelect),
+                 @(GSTouchClusterMenu), @(GSTouchClusterTouchScreen)];
+    }
+    if ([system isEqualToString: @"nes"] || [system isEqualToString: @"gb"] || [system isEqualToString: @"gbc"]) {
+        // 8 位机没有 L / R 肩键
+        return @[@(GSTouchClusterDPad), @(GSTouchClusterFace), @(GSTouchClusterStartSelect)];
+    }
+    // snes / gba / 未知：十字键 + A/B(/X/Y) + L/R + START/SELECT
+    return @[@(GSTouchClusterDPad), @(GSTouchClusterFace),
+             @(GSTouchClusterL), @(GSTouchClusterR), @(GSTouchClusterStartSelect)];
+}
+
+/// SNES / NDS 的 A / B 簇要画成 A / B / X / Y 四键
+static BOOL GSSystemUsesFourFaceKeys(NSString *systemIdentifier) {
+    NSString *system = GSSystemKey(systemIdentifier);
+    return [system isEqualToString: @"snes"] || [system isEqualToString: @"nds"];
+}
+
+/// 各按键簇在某系统里的内置默认布局（归一化中心 + 缩放）。
+///   · 8/16 位机与 GBA 沿用 Delta「Standard GBA」皮肤的 iPhone 横屏数值（画布 667×375）：
+///     十字键左下、A/B 右下、L/R 顶部两角、START/SELECT 底部居中；
+///   · NDS 用 Delta「Standard DS」横屏数值（同为 667×375）：A/B/X/Y 四键在右、
+///     L/R 在两侧偏中、Menu 与下屏触摸区各就各位 —— 与 GBA 明显不同，这正是要按系统区分的点。
+static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, NSString *systemIdentifier) {
+    if ([GSSystemKey(systemIdentifier) isEqualToString: @"nds"]) {
+        switch (cluster) {
+            case GSTouchClusterDPad:        return [GSTouchClusterLayout layoutWithX: 0.115 y: 0.791 scale: 1.0];
+            case GSTouchClusterFace:        return [GSTouchClusterLayout layoutWithX: 0.878 y: 0.791 scale: 1.0];
+            case GSTouchClusterL:           return [GSTouchClusterLayout layoutWithX: 0.361 y: 0.628 scale: 1.0];
+            case GSTouchClusterR:           return [GSTouchClusterLayout layoutWithX: 0.640 y: 0.628 scale: 1.0];
+            case GSTouchClusterStartSelect: return [GSTouchClusterLayout layoutWithX: 0.535 y: 0.767 scale: 1.0];
+            case GSTouchClusterMenu:        return [GSTouchClusterLayout layoutWithX: 0.292 y: 0.768 scale: 1.0];
+            case GSTouchClusterTouchScreen: return [GSTouchClusterLayout layoutWithX: 0.735 y: 0.323 scale: 1.0];
+        }
+        return [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
+    }
+
+    // nes / gb / gbc / snes / gba / 未知：Delta「Standard GBA」
     switch (cluster) {
         case GSTouchClusterDPad:        return [GSTouchClusterLayout layoutWithX: 0.143 y: 0.745 scale: 1.0];
         case GSTouchClusterFace:        return [GSTouchClusterLayout layoutWithX: 0.865 y: 0.784 scale: 1.0];
         case GSTouchClusterL:           return [GSTouchClusterLayout layoutWithX: 0.097 y: 0.093 scale: 1.0];
         case GSTouchClusterR:           return [GSTouchClusterLayout layoutWithX: 0.903 y: 0.093 scale: 1.0];
         case GSTouchClusterStartSelect: return [GSTouchClusterLayout layoutWithX: 0.501 y: 0.928 scale: 1.0];
+        case GSTouchClusterMenu:        return [GSTouchClusterLayout layoutWithX: 0.292 y: 0.768 scale: 1.0];
+        case GSTouchClusterTouchScreen: return [GSTouchClusterLayout layoutWithX: 0.735 y: 0.323 scale: 1.0];
     }
     return [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
 }
+
+#pragma mark - 布局对象
 
 @implementation GSTouchClusterLayout
 
@@ -158,8 +233,10 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
 @interface GSKeyMapping ()
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *keyboardBindings;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *gamepadBindings;
-/// 用户自定义过的按键簇布局（key = GSTouchCluster 的 NSNumber）；没存进来的就是内置默认
-@property (nonatomic, strong) NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *touchLayouts;
+/// 按系统的自定义布局：system → (GSTouchCluster 的 NSNumber → layout)；没存进来的就是内置默认
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *> *touchLayouts;
+/// 按系统的可见性覆盖：system → (GSTouchCluster 的 NSNumber → NSNumber(BOOL))；没有覆盖时按默认显示
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableDictionary<NSNumber *, NSNumber *> *> *touchVisibility;
 
 + (NSDictionary<NSString *, NSNumber *> *)defaultKeyboardBindings;
 + (NSDictionary<NSString *, NSString *> *)defaultGamepadBindings;
@@ -182,10 +259,11 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
     if (self) {
         _keyboardBindings = [NSMutableDictionary dictionary];
         _gamepadBindings = [NSMutableDictionary dictionary];
+        _touchLayouts = [NSMutableDictionary dictionary];
+        _touchVisibility = [NSMutableDictionary dictionary];
         [self applyDefaultTouchProfile];
         _keyboardBindings = [[GSKeyMapping defaultKeyboardBindings] mutableCopy];
         _gamepadBindings = [[GSKeyMapping defaultGamepadBindings] mutableCopy];
-        _touchLayouts = [NSMutableDictionary dictionary];
         [self loadFromDisk];
     }
     return self;
@@ -219,15 +297,11 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
     }
 }
 
-#pragma mark - 触屏
+#pragma mark - 触屏整体
 
 - (void)applyDefaultTouchProfile {
     _touchScale = 1.0;
     _touchOpacity = 0.92;
-    _touchShowDPad = YES;
-    _touchShowFace = YES;
-    _touchShowShoulders = YES;
-    _touchShowStartSelect = YES;
 }
 
 - (void)setTouchScale:(CGFloat)touchScale {
@@ -238,49 +312,85 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
     _touchOpacity = MAX((CGFloat)0.3, MIN((CGFloat)1.0, touchOpacity));
 }
 
-#pragma mark - 触屏按键簇布局
+#pragma mark - 触屏按键簇（按系统区分）
 
-+ (NSArray<NSNumber *> *)touchClusters {
-    return @[
-        @(GSTouchClusterDPad), @(GSTouchClusterFace),
-        @(GSTouchClusterL), @(GSTouchClusterR),
-        @(GSTouchClusterStartSelect),
-    ];
++ (NSArray<NSNumber *> *)touchClustersForSystem:(NSString *)systemIdentifier {
+    return GSClustersForSystem(systemIdentifier);
 }
 
-+ (NSString *)displayNameForCluster:(GSTouchCluster)cluster {
++ (BOOL)systemUsesFourFaceKeys:(NSString *)systemIdentifier {
+    return GSSystemUsesFourFaceKeys(systemIdentifier);
+}
+
++ (NSString *)displayNameForCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier {
     switch (cluster) {
         case GSTouchClusterDPad:        return @"十字键";
-        case GSTouchClusterFace:        return @"A / B";
+        case GSTouchClusterFace:        return GSSystemUsesFourFaceKeys(systemIdentifier) ? @"A / B / X / Y" : @"A / B";
         case GSTouchClusterL:           return @"L 肩键";
         case GSTouchClusterR:           return @"R 肩键";
         case GSTouchClusterStartSelect: return @"START / SELECT";
+        case GSTouchClusterMenu:        return @"Menu";
+        case GSTouchClusterTouchScreen: return @"触摸屏";
     }
     return @"按键簇";
 }
 
-- (GSTouchClusterLayout *)layoutForCluster:(GSTouchCluster)cluster {
-    GSTouchClusterLayout *layout = self.touchLayouts[@(cluster)];
-    return layout != nil ? layout : GSDefaultLayoutForCluster(cluster);
+- (GSTouchClusterLayout *)layoutForCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier {
+    NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *bucket = self.touchLayouts[GSSystemKey(systemIdentifier)];
+    GSTouchClusterLayout *layout = bucket[@(cluster)];
+    return layout != nil ? layout : GSDefaultLayoutForCluster(cluster, systemIdentifier);
 }
 
-- (void)setLayout:(GSTouchClusterLayout *)layout forCluster:(GSTouchCluster)cluster {
+- (void)setLayout:(GSTouchClusterLayout *)layout forCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier {
     if (layout == nil) {
         return;
     }
+    NSString *system = GSSystemKey(systemIdentifier);
+    NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *bucket = self.touchLayouts[system];
+    if (bucket == nil) {
+        bucket = [NSMutableDictionary dictionary];
+        self.touchLayouts[system] = bucket;
+    }
     // 值域收在这里，播放器与设置页都不必再各自夹一遍
-    self.touchLayouts[@(cluster)] = [GSTouchClusterLayout layoutWithX: MAX((CGFloat)0.0, MIN((CGFloat)1.0, layout.x))
-                                                                     y: MAX((CGFloat)0.0, MIN((CGFloat)1.0, layout.y))
-                                                                 scale: MAX((CGFloat)0.6, MIN((CGFloat)1.6, layout.scale))];
+    bucket[@(cluster)] = [GSTouchClusterLayout layoutWithX: MAX((CGFloat)0.0, MIN((CGFloat)1.0, layout.x))
+                                                          y: MAX((CGFloat)0.0, MIN((CGFloat)1.0, layout.y))
+                                                      scale: MAX((CGFloat)0.6, MIN((CGFloat)1.6, layout.scale))];
 }
 
-- (BOOL)hasCustomTouchLayout {
-    return self.touchLayouts.count > 0;
+- (BOOL)hasCustomTouchLayoutForSystem:(NSString *)systemIdentifier {
+    NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *bucket = self.touchLayouts[GSSystemKey(systemIdentifier)];
+    return bucket.count > 0;
 }
 
-- (void)resetTouchLayouts {
-    [self.touchLayouts removeAllObjects];
+- (void)resetTouchLayoutsForSystem:(NSString *)systemIdentifier {
+    NSString *system = GSSystemKey(systemIdentifier);
+    [self.touchLayouts removeObjectForKey: system];
+    [self.touchVisibility removeObjectForKey: system];
     [self persist];
+}
+
+- (BOOL)isClusterVisible:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier {
+    NSNumber *override = self.touchVisibility[GSSystemKey(systemIdentifier)][@(cluster)];
+    if (override != nil) {
+        return override.boolValue;
+    }
+    // 没被显式改过时，属于该系统按键簇集合的就默认显示
+    for (NSNumber *number in GSClustersForSystem(systemIdentifier)) {
+        if ((GSTouchCluster)number.integerValue == cluster) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (void)setVisible:(BOOL)visible forCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier {
+    NSString *system = GSSystemKey(systemIdentifier);
+    NSMutableDictionary<NSNumber *, NSNumber *> *bucket = self.touchVisibility[system];
+    if (bucket == nil) {
+        bucket = [NSMutableDictionary dictionary];
+        self.touchVisibility[system] = bucket;
+    }
+    bucket[@(cluster)] = @(visible);
 }
 
 #pragma mark - 默认键位
@@ -425,19 +535,54 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
 
 - (NSDictionary *)dictionaryRepresentation {
     return @{
-        @"version": @1,
+        @"version": @2,
         @"touch": @{
             @"scale": @(self.touchScale),
             @"opacity": @(self.touchOpacity),
-            @"showDPad": @(self.touchShowDPad),
-            @"showFace": @(self.touchShowFace),
-            @"showShoulders": @(self.touchShowShoulders),
-            @"showStartSelect": @(self.touchShowStartSelect),
         },
+        @"visibility": [self touchVisibilityRepresentation],
         @"keyboard": [self.keyboardBindings copy],
         @"gamepad": [self.gamepadBindings copy],
         @"layouts": [self touchLayoutsRepresentation],
     };
+}
+
+/// 按键簇布局的持久化形式：system → (cluster → {x,y,scale})；
+/// 没自定义过的簇不写盘，读回时自然回落该系统的内置默认值。
+- (NSDictionary *)touchLayoutsRepresentation {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSString *system in self.touchLayouts) {
+        NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *bucket = self.touchLayouts[system];
+        NSMutableDictionary *entries = [NSMutableDictionary dictionary];
+        for (NSNumber *number in bucket) {
+            GSTouchClusterLayout *layout = bucket[number];
+            entries[GSTouchClusterKey((GSTouchCluster)number.integerValue)] = @{
+                @"x": @(layout.x),
+                @"y": @(layout.y),
+                @"scale": @(layout.scale),
+            };
+        }
+        if (entries.count > 0) {
+            result[system] = entries;
+        }
+    }
+    return result;
+}
+
+/// 可见性覆盖的持久化形式：system → (cluster → BOOL)
+- (NSDictionary *)touchVisibilityRepresentation {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSString *system in self.touchVisibility) {
+        NSMutableDictionary<NSNumber *, NSNumber *> *bucket = self.touchVisibility[system];
+        NSMutableDictionary *entries = [NSMutableDictionary dictionary];
+        for (NSNumber *number in bucket) {
+            entries[GSTouchClusterKey((GSTouchCluster)number.integerValue)] = bucket[number];
+        }
+        if (entries.count > 0) {
+            result[system] = entries;
+        }
+    }
+    return result;
 }
 
 - (void)persist {
@@ -469,16 +614,16 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
     }
     NSDictionary *dictionary = object;
 
+    // 触屏整体：scale / opacity；顺带识别旧格式的 4 个全局显示开关（迁移用）
     NSDictionary *touch = dictionary[@"touch"];
+    BOOL hasLegacyShowFlags = NO;
     if ([touch isKindOfClass: [NSDictionary class]]) {
-        id scale = touch[@"scale"];
-        id opacity = touch[@"opacity"];
-        if ([scale isKindOfClass: [NSNumber class]]) { self.touchScale = [scale doubleValue]; }
-        if ([opacity isKindOfClass: [NSNumber class]]) { self.touchOpacity = [opacity doubleValue]; }
-        if ([touch[@"showDPad"] isKindOfClass: [NSNumber class]]) { self.touchShowDPad = [touch[@"showDPad"] boolValue]; }
-        if ([touch[@"showFace"] isKindOfClass: [NSNumber class]]) { self.touchShowFace = [touch[@"showFace"] boolValue]; }
-        if ([touch[@"showShoulders"] isKindOfClass: [NSNumber class]]) { self.touchShowShoulders = [touch[@"showShoulders"] boolValue]; }
-        if ([touch[@"showStartSelect"] isKindOfClass: [NSNumber class]]) { self.touchShowStartSelect = [touch[@"showStartSelect"] boolValue]; }
+        if ([touch[@"scale"] isKindOfClass: [NSNumber class]]) { self.touchScale = [touch[@"scale"] doubleValue]; }
+        if ([touch[@"opacity"] isKindOfClass: [NSNumber class]]) { self.touchOpacity = [touch[@"opacity"] doubleValue]; }
+        hasLegacyShowFlags = ([touch[@"showDPad"] isKindOfClass: [NSNumber class]] ||
+                              [touch[@"showFace"] isKindOfClass: [NSNumber class]] ||
+                              [touch[@"showShoulders"] isKindOfClass: [NSNumber class]] ||
+                              [touch[@"showStartSelect"] isKindOfClass: [NSNumber class]]);
     }
 
     NSDictionary *keyboard = dictionary[@"keyboard"];
@@ -493,22 +638,80 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
         self.keyboardBindings = loaded;
     }
 
+    // 布局：新格式是 system → cluster → {x,y,scale}；
+    // 旧格式是扁平的 cluster → {x,y,scale}（本次「按系统区分」之前写下的），要先迁移。
+    NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *legacyFlat = [NSMutableDictionary dictionary];
     NSDictionary *layouts = dictionary[@"layouts"];
     if ([layouts isKindOfClass: [NSDictionary class]]) {
-        NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *loaded = [NSMutableDictionary dictionary];
-        for (id key in layouts) {
-            id entry = layouts[key];
-            if (![key isKindOfClass: [NSString class]] || ![entry isKindOfClass: [NSDictionary class]]) {
+        BOOL isLegacy = ([layouts[@"dpad"] isKindOfClass: [NSDictionary class]] ||
+                         [layouts[@"face"] isKindOfClass: [NSDictionary class]] ||
+                         [layouts[@"startSelect"] isKindOfClass: [NSDictionary class]] ||
+                         [layouts[@"menu"] isKindOfClass: [NSDictionary class]] ||
+                         [layouts[@"touchScreen"] isKindOfClass: [NSDictionary class]]);
+        if (isLegacy) {
+            [legacyFlat addEntriesFromDictionary: GSParseLayoutBucket(layouts)];
+        } else {
+            for (id systemKey in layouts) {
+                if (![systemKey isKindOfClass: [NSString class]] ||
+                    ![layouts[systemKey] isKindOfClass: [NSDictionary class]]) {
+                    continue;
+                }
+                NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *bucket = GSParseLayoutBucket(layouts[systemKey]);
+                if (bucket.count > 0) {
+                    self.touchLayouts[[systemKey lowercaseString]] = bucket;
+                }
+            }
+        }
+    }
+
+    // 可见性（新格式）：system → cluster → BOOL
+    NSDictionary *visibility = dictionary[@"visibility"];
+    if ([visibility isKindOfClass: [NSDictionary class]]) {
+        for (id systemKey in visibility) {
+            if (![systemKey isKindOfClass: [NSString class]] ||
+                ![visibility[systemKey] isKindOfClass: [NSDictionary class]]) {
                 continue;
             }
-            NSDictionary *values = entry;
-            GSTouchClusterLayout *layout = [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
-            if ([values[@"x"] isKindOfClass: [NSNumber class]]) { layout.x = [values[@"x"] doubleValue]; }
-            if ([values[@"y"] isKindOfClass: [NSNumber class]]) { layout.y = [values[@"y"] doubleValue]; }
-            if ([values[@"scale"] isKindOfClass: [NSNumber class]]) { layout.scale = [values[@"scale"] doubleValue]; }
-            loaded[@(GSTouchClusterFromKey(key))] = layout;
+            NSDictionary *entries = visibility[systemKey];
+            NSMutableDictionary<NSNumber *, NSNumber *> *bucket = [NSMutableDictionary dictionary];
+            for (id key in entries) {
+                if ([key isKindOfClass: [NSString class]] && [entries[key] isKindOfClass: [NSNumber class]]) {
+                    bucket[@(GSTouchClusterFromKey(key))] = entries[key];
+                }
+            }
+            if (bucket.count > 0) {
+                self.touchVisibility[[systemKey lowercaseString]] = bucket;
+            }
         }
-        self.touchLayouts = loaded;
+    }
+
+    // 旧格式迁移：把扁平的布局与 4 个全局开关，平摊到每个已接入系统里有对应簇的那些
+    if (legacyFlat.count > 0 || hasLegacyShowFlags) {
+        for (NSString *system in @[@"nes", @"snes", @"gb", @"gbc", @"gba", @"nds"]) {
+            NSArray<NSNumber *> *clusters = GSClustersForSystem(system);
+            for (NSNumber *number in legacyFlat) {
+                if ([clusters containsObject: number]) {
+                    [self setLayout: legacyFlat[number]
+                         forCluster: (GSTouchCluster)number.integerValue
+                          forSystem: system];
+                }
+            }
+            if (hasLegacyShowFlags) {
+                for (NSNumber *number in clusters) {
+                    GSTouchCluster cluster = (GSTouchCluster)number.integerValue;
+                    BOOL visible = YES;
+                    switch (cluster) {
+                        case GSTouchClusterDPad:        visible = [touch[@"showDPad"] boolValue]; break;
+                        case GSTouchClusterFace:        visible = [touch[@"showFace"] boolValue]; break;
+                        case GSTouchClusterL:
+                        case GSTouchClusterR:           visible = [touch[@"showShoulders"] boolValue]; break;
+                        case GSTouchClusterStartSelect: visible = [touch[@"showStartSelect"] boolValue]; break;
+                        default:                        visible = YES; break;  // menu / touchScreen 是新增的
+                    }
+                    [self setVisible: visible forCluster: cluster forSystem: system];
+                }
+            }
+        }
     }
 
     NSDictionary *gamepad = dictionary[@"gamepad"];
@@ -524,26 +727,10 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
     }
 }
 
-/// 按键簇布局的持久化形式：没自定义过的簇不写盘，读回时自然回落内置默认值
-- (NSDictionary *)touchLayoutsRepresentation {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    for (NSNumber *number in [GSKeyMapping touchClusters]) {
-        GSTouchClusterLayout *layout = self.touchLayouts[number];
-        if (layout == nil) {
-            continue;
-        }
-        result[GSTouchClusterKey((GSTouchCluster)number.integerValue)] = @{
-            @"x": @(layout.x),
-            @"y": @(layout.y),
-            @"scale": @(layout.scale),
-        };
-    }
-    return result;
-}
-
 - (void)resetToDefaults {
     [self applyDefaultTouchProfile];
     [self.touchLayouts removeAllObjects];
+    [self.touchVisibility removeAllObjects];
     self.keyboardBindings = [[GSKeyMapping defaultKeyboardBindings] mutableCopy];
     self.gamepadBindings = [[GSKeyMapping defaultGamepadBindings] mutableCopy];
     [self persist];

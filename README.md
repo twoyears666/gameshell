@@ -15,8 +15,8 @@
   **不内置任何 ROM**，全部由你自己导入（App 内导入，或从「文件」App 拷进 `Documents/ROMs/<系统>/`）
 - **已接入的核心**：**mGBA**（GBA / GB / GBC）+ **Nestopia**（NES）+ **Mesen-S**（SNES）+ **melonDS**（NDS / DSi）；3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
 - **游戏封面**：URL 条目可在「添加」时**导入本地图标**；模拟器 ROM 会**自动联网抓取官方封面**（libretro-thumbnails 的 `Named_Boxarts`），命中即缓存，未命中回退到系统徽标，不报错
-- **键位设置**：右上角齿轮进设置页，可分别调整**触屏**（缩放 / 透明度 / 各按键簇显隐，并在「编辑布局」里**拖拽移动每一簇、调整其大小**）、**键盘**、**手柄**三端键位，改完即生效并持久化
-- **虚拟手柄**：操控界面自绘（布局参照 Delta / manic emu），**不借鉴 RetroArch 的触屏 UI**
+- **键位设置**：右上角齿轮进设置页，可分别调整**触屏**、**键盘**、**手柄**三端键位，改完即生效并持久化；触屏部分**按系统分别配置** —— 先选系统（GB / GBC / GBA / NES / SNES / NDS），再调缩放 / 透明度 / 各按键簇显隐，并在「编辑布局」里**拖拽移动每一簇、调整其大小**（每个系统一套独立布局）
+- **虚拟手柄**：操控界面自绘（布局参照 Delta / manic emu），**不借鉴 RetroArch 的触屏 UI**；**按键簇按系统区分** —— 8 / 16 位机是十字键 + A / B + START / SELECT（GBA / SNES 另有 L / R，SNES 为四键菱形），NDS 则是 A / B / X / Y 四键菱形 + L / R + MENU + 可触摸的下屏
 - **第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
 - **输入**：**手柄**（GameController 框架，热插拔）与 **键鼠**都能被识别；模拟器内触屏 / 键盘 / 手柄三端按键会汇总成一份位掩码转发给核心
 - **构建**：GitHub Actions CI（macOS runner：XcodeGen + xcodebuild）
@@ -234,7 +234,7 @@ build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，�
          沙盒 Documents/Icons/<id>.<ext>（导入的条目图标）
          沙盒 Documents/Covers/<系统>/<ROM>.png（抓取到的 ROM 封面）
          沙盒 Documents/play_history.json（最近游玩）
-         沙盒 Documents/keymap.json（三端键位 + 触屏布局：每簇的位置与大小）
+         沙盒 Documents/keymap.json（三端键位 + 触屏布局：按系统分桶，每系统一套每簇的位置与大小）
 ```
 
 ## 设计约束
