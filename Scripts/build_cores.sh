@@ -11,8 +11,10 @@
 #   mGBA     —— GBA / GB / GBC（Vendor/mgba，MPL-2.0）
 #   Nestopia —— NES / Famicom（Vendor/nestopia，GPL-3.0）
 #   Mesen-S  —— SNES / Super Famicom（Vendor/mesens，GPL-3.0）
-# 尚无源码 / 尚未接入的核心（melonDS、Azahar、Dolphin、Cemu 等）只留空壳库，
-# 由 GSBuiltCores.h 里的开关如实标成 0。
+#   melonDS  —— NDS / DSi（Vendor/melonds，GPL-3.0；编入 ARM64 JIT，无 JIT 时自动走解释器）
+# 尚无源码 / 尚未接入的核心只留空壳库，由 GSBuiltCores.h 里的开关如实标成 0：
+#   · Azahar(3DS) / Dolphin(Wii) 需要 GL 硬件渲染宿主层，待立项（本轮不接，不假装接入）；
+#   · Wii U 核心本轮不做。
 #
 # 产物（每个平台一份，互不污染）：
 #   build/cores/<PLATFORM>/lib<核心名>.a   —— 静态库（编译失败时是空壳，保证链接不报错）
@@ -36,6 +38,7 @@ HEADER="$OUT_DIR/GSBuiltCores.h"
 MGBA_DIR="$ROOT/Vendor/mgba"
 NESTOPIA_DIR="$ROOT/Vendor/nestopia"
 MESENS_DIR="$ROOT/Vendor/mesens"
+MELONDS_DIR="$ROOT/Vendor/melonds"
 
 mkdir -p "$OUT_DIR"
 
@@ -43,6 +46,7 @@ mkdir -p "$OUT_DIR"
 have_mgba=0
 have_nestopia=0
 have_mesens=0
+have_melonds=0
 summary=""
 
 log() { printf '[build_cores] %s\n' "$*"; }
@@ -100,13 +104,14 @@ write_header() {
 #define GS_HAVE_MGBA $have_mgba
 #define GS_HAVE_NESTOPIA $have_nestopia
 #define GS_HAVE_MESENS $have_mesens
+#define GS_HAVE_MELONDS $have_melonds
 
 #define GS_CORES_PLATFORM "$PLATFORM"
 #define GS_CORES_NOTE "$summary"
 
 #endif
 EOF
-	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Mesen-S=${have_mesens}）"
+	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Mesen-S=${have_mesens} melonDS=${have_melonds}）"
 }
 
 # 收尾：没编出来的核心补空壳库，然后写编译期开关头。成功编出来的核心不动（不覆盖真库）。
@@ -114,6 +119,7 @@ finalize() {
 	[ "$have_mgba" -eq 1 ] || make_stub_library mgba
 	[ "$have_nestopia" -eq 1 ] || make_stub_library nestopia
 	[ "$have_mesens" -eq 1 ] || make_stub_library mesens
+	[ "$have_melonds" -eq 1 ] || make_stub_library melonds
 	write_header
 }
 
@@ -122,6 +128,7 @@ finish_without_cores() {
 	have_mgba=0
 	have_nestopia=0
 	have_mesens=0
+	have_melonds=0
 	summary="$1"
 	finalize
 	exit 0
@@ -180,6 +187,58 @@ build_cmake_core() {
 	fi
 
 	cp "$built" "$OUT_DIR/lib${name}.a"
+	log "完成：${OUT_DIR}/lib${name}.a（$(du -h "$OUT_DIR/lib${name}.a" | cut -f1)）"
+	return 0
+}
+
+# 交叉编译一个「libretro 标准 Makefile」形态的核心。
+# 用法：build_make_core <核心名> <源码目录> <产物文件名> [额外的 make 变量...]
+# 成功返回 0 并把产物放到 $OUT_DIR/lib<核心名>.a；失败返回 1，日志留在
+# $OUT_DIR/<核心名>-build.log。
+#
+# melonDS 的 make 会把 .o 直接写在源码树里（Makefile 的 `%.o: %.cpp` 没有 OBJDIR），
+# 为了不污染 Vendor/（那是要入库的上游源码），先把源码 rsync 一份到
+# $OUT_DIR/<核心名>-build/ 再在里面编。
+#
+# 交叉编译要点：
+#   platform=ios-arm64 → Makefile 走 iOS 分支（TARGET 变成 *_libretro_ios.dylib）
+#   STATIC_LINKING=1   → 链接规则从 $(LD) -dynamiclib 换成 $(AR) rcs（产静态归档）
+#   IOSSDK=$SDK_PATH   → Makefile 用 -isysroot 找 SDK
+#   CC/CXX 显式指到 SDK 里的 clang：Makefile 的 iOS 分支硬写 `cc`/`c++`（第 139-140 行），
+#     命令行变量优先于 Makefile 赋值，这里覆盖掉它，编出来才是 iOS 目标架构，
+#     否则 .a 是宿主架构、链接期被 ld 整档忽略。
+#   产物名仍是 melonds_libretro_ios.dylib（iOS 分支把 TARGET 写死了，STATIC_LINKING=1
+#   只改链接规则、不改文件名），内容其实是 ar 归档 → 复制成 lib<核心名>.a。
+build_make_core() {
+	local name="$1"
+	local src_dir="$2"
+	local artifact="$3"
+	shift 3
+
+	local build_dir="$OUT_DIR/${name}-build"
+	local build_log="$OUT_DIR/${name}-build.log"
+
+	rm -rf "$build_dir"
+	mkdir -p "$build_dir"
+	rsync -a --delete --exclude '.git' "$src_dir/" "$build_dir/" >> "$build_log" 2>&1
+
+	log "开始编译 lib${name}.a（日志：${build_log}）"
+	( cd "$build_dir" \
+		&& make -j4 \
+			platform=ios-arm64 \
+			STATIC_LINKING=1 \
+			IOSSDK="$SDK_PATH" \
+			MINVERSION="-miphoneos-version-min=16.0" \
+			CC="$CC -arch arm64 -isysroot $SDK_PATH" \
+			CXX="$CXX -arch arm64 -isysroot $SDK_PATH" \
+			"$@" ) >> "$build_log" 2>&1
+
+	if [ ! -f "$build_dir/$artifact" ]; then
+		log "${name} 编译失败或未产出 ${artifact}，详情见 ${build_log}"
+		return 1
+	fi
+
+	cp "$build_dir/$artifact" "$OUT_DIR/lib${name}.a"
 	log "完成：${OUT_DIR}/lib${name}.a（$(du -h "$OUT_DIR/lib${name}.a" | cut -f1)）"
 	return 0
 }
@@ -295,11 +354,32 @@ else
 	log "找不到 ${MESENS_DIR}/CMakeLists.txt，跳过 Mesen-S"
 fi
 
+# ---------------------------------------------------------------- melonDS（NDS / DSi）
+# 上游 libretro fork（Vendor/melonds，GPL-3.0），构建系统是标准的 libretro Makefile。
+# 关键点：
+#   · 走 libretro 软件渲染 + CPU 帧缓冲链路（HAVE_OPENGL 默认 0；GPU3D_Soft.cpp 始终编入），
+#     与宿主「只要一帧 RGBA8888」的架构匹配（见 Sources/Core/GSMelonDSCore.mm）。
+#   · JIT_ARCH=aarch64 显式打开 ARM64 dynarec（iOS 分支默认不开）。
+#     于是库里同时有 JIT 与解释器两条路径，运行时由宿主按探测结果作答核心选项
+#     melonds_jit_enable：JIT 可用→enabled（走 dynarec），不可用→disabled（走解释器）。
+#     JIT 用 mmap(MAP_JIT) + pthread_jit_write_protect_np，需要 JIT entitlement（tipa 已带）。
+#   · Vendor/melonds/Makefile.common 有一处 Gameshell 补丁：把上游
+#     `ifneq ($(STATIC_LINKING),1)` 的 libretro-common 守卫改成恒真，
+#     否则静态链接时这些符号没人提供，App 链接期会一片 undefined symbol。
+if [ -f "$MELONDS_DIR/Makefile" ]; then
+	if build_make_core melonds "$MELONDS_DIR" melonds_libretro_ios.dylib JIT_ARCH=aarch64; then
+		have_melonds=1
+	fi
+else
+	log "找不到 ${MELONDS_DIR}/Makefile，跳过 melonDS"
+fi
+
 # ---------------------------------------------------------------- 汇总
 built=""
 [ "$have_mgba" -eq 1 ] && built="${built}mGBA（GBA/GB/GBC）、"
 [ "$have_nestopia" -eq 1 ] && built="${built}Nestopia（NES）、"
 [ "$have_mesens" -eq 1 ] && built="${built}Mesen-S（SNES）、"
+[ "$have_melonds" -eq 1 ] && built="${built}melonDS（NDS/DSi）、"
 if [ -z "$built" ]; then
 	summary="本次没有核心编译成功（见各 *-configure.log / *-build.log）"
 else

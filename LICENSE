@@ -695,10 +695,21 @@ Gameshell 以 GNU General Public License v3.0（即上面全文）发布。
     许可证全文：Vendor/mesens/LICENSE
     （说明：该仓库上游为 github.com/SourMesen/Mesen-S，2019 年归档，许可证即 GPLv3。）
 
+  · Vendor/melonds —— melonDS，GPL-3.0（GNU General Public License v3.0）。
+    已接入：NDS / DSi（走它的 libretro 前端形态，STATIC_LINKING=1 交叉编译成 arm64
+    静态库链接进主二进制；库内同时编入 ARM64 dynarec（JIT）与解释器两条路径，
+    运行时按 GSJIT 的真实探测结果在两者之间切换）
+    许可证全文：Vendor/melonds/LICENSE
+    （说明：该仓库上游为 github.com/melonDS-emu/melonDS（早期为 Arisotura/melonDS），GPLv3。）
+    （本仓库给 Vendor/melonds 打了自有的小补丁，只动构建与符号名、不改核心行为：
+      1) Makefile.common 放开静态链接时被上游关掉的 libretro-common 源文件守卫；
+      2) src/libretro/gs_symbol_prefix.h 把核心侧入口点（retro_*）改名成 gsmds_ 前缀，
+         避免与同一进程里静态链接的另一个 libretro 核心 Mesen-S 的入口点同名冲突。）
+
   · Snes9x —— **不接入**。其许可证为非商用许可（"freeware for PERSONAL USE only"、
     "Under no circumstances will commercial rights be given"），不是开源许可，
     与整仓 GPL-3.0 不兼容，因此本项目不引入它的源码。
     SNES 改用 GPL-3.0 的 Mesen-S（见上条）。
 
-  · NDS / 3DS / Wii / Wii U 的计划核心（Azahar / Dolphin / Cemu 等）
+  · 3DS / Wii / Wii U 的计划核心（Azahar / Dolphin / Cemu 等）
     **均尚未接入**，各自许可证以其上游仓库为准，接入时会补到这里。

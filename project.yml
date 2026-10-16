@@ -105,6 +105,10 @@ targets:
           - $(SRCROOT)/Vendor/nestopia/source/core/api
           # Mesen-S 的 libretro 契约头（GSSnesCore.mm include 了 libretro.h）
           - $(SRCROOT)/Vendor/mesens/Libretro
+          # melonDS 的 libretro 契约头（GSMelonDSCore.mm 刻意写
+          # libretro-common/include/libretro.h，避免命中上面 Mesen-S 那份）
+          # 以及两处共用的入口点符号前缀头 gs_symbol_prefix.h
+          - $(SRCROOT)/Vendor/melonds/src/libretro
         # 静态库按平台放在 build/cores/<PLATFORM>，macOS 上是空壳库（保证 -lmgba 找得到）
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/build/cores/$(PLATFORM_NAME)
@@ -112,6 +116,7 @@ targets:
           - -lmgba
           - -lnestopia
           - -lmesens
+          - -lmelonds
 
 schemes:
   Gameshell:

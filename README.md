@@ -2,7 +2,7 @@
 
 一个 **iOS / iPadOS / macOS** 的 URL 启动器 **UI 壳**（shell）。
 界面风格参考 **盖世游戏 / GameHub**、第一排方块行参考 **PS5 首页**，但**不使用其任何代码或资源**，仅参照「布局结构与视觉语言」。
-本仓库以「壳 + 启动通路」为主；模拟器部分**已接入 mGBA、Nestopia 与 Mesen-S**（GBA / GB / GBC / NES / SNES），其余系统**尚未接入**。
+本仓库以「壳 + 启动通路」为主；模拟器部分**已接入 mGBA、Nestopia、Mesen-S 与 melonDS**（GBA / GB / GBC / NES / SNES / NDS），其余系统**尚未接入**。
 功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
 
 - **主界面**：顶栏 + 顶排「最近游玩」（最多 10 个）+ 「游戏库」方块行（URL 条目与模拟器 ROM 混排）；另有**设置页**（触屏 / 键盘 / 手柄三端键位，触屏还能拖拽调位置与大小）
@@ -13,7 +13,7 @@
 - **不内置任何游戏**：清单默认为空，所有条目都由你自己添加
 - **模拟器 ROM 导入与模拟**：游戏库右上角「导入 ROM」，导入后点开卡片即用内置核心模拟；
   **不内置任何 ROM**，全部由你自己导入（App 内导入，或从「文件」App 拷进 `Documents/ROMs/<系统>/`）
-- **已接入的核心**：**mGBA**（GBA / GB / GBC）+ **Nestopia**（NES）+ **Mesen-S**（SNES）；NDS / 3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
+- **已接入的核心**：**mGBA**（GBA / GB / GBC）+ **Nestopia**（NES）+ **Mesen-S**（SNES）+ **melonDS**（NDS / DSi）；3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
 - **游戏封面**：URL 条目可在「添加」时**导入本地图标**；模拟器 ROM 会**自动联网抓取官方封面**（libretro-thumbnails 的 `Named_Boxarts`），命中即缓存，未命中回退到系统徽标，不报错
 - **键位设置**：右上角齿轮进设置页，可分别调整**触屏**（缩放 / 透明度 / 各按键簇显隐，并在「编辑布局」里**拖拽移动每一簇、调整其大小**）、**键盘**、**手柄**三端键位，改完即生效并持久化
 - **虚拟手柄**：操控界面自绘（布局参照 Delta / manic emu），**不借鉴 RetroArch 的触屏 UI**
@@ -152,7 +152,7 @@ ROM **全由你自己导入**，App 不内置、也不下载任何 ROM。
 | GB | `.gb` | mGBA（MPL-2.0） | ✅ **已接入** |
 | GBC | `.gbc` | mGBA（MPL-2.0） | ✅ **已接入** |
 | GBA | `.gba` `.agb` | mGBA（MPL-2.0） | ✅ **已接入** |
-| NDS | `.nds` | melonDS（GPL-3.0） | **未接入** |
+| NDS | `.nds` | melonDS（GPL-3.0） | ✅ **已接入**（拿得到 JIT 走 dynarec，拿不到自动退回解释器） |
 | 3DS | `.3ds` `.cia` `.cci` `.cxi` `.app` | Azahar 系（GPL-2.0，**需 JIT**） | **未接入** |
 | Wii | `.wbfs` `.iso` `.rvz` `.wia` `.dol` `.elf` | Dolphin（GPL-2.0+，**需 JIT**） | **未接入** |
 | Wii U | `.wud` `.wux` `.rpx` `.wua` `.rpl` | Cemu / MeloCafe 系（MPL-2.0，**需 JIT**） | **未接入** |
@@ -187,7 +187,9 @@ iOS 15 + A12 起系统封禁了 `dynamic-codesigning` 与 `com.apple.private.cs.
 > ⚠️ 代价：tipa 因为要 `no-sandbox` 才能自开 JIT，装好后 App 会**脱离沙盒**，`Documents` 可能不再解析到自己的容器
 > （若真机发现路径异常，需要按 `HOME` 兜底）。普通 IPA / macOS 不带这些项，保持沙盒。
 
-> 现状：**目前还没有任何依赖 JIT 的核心真正接入**，上面这些是为后续接入准备的；现在 JIT 探测结果只用于**如实展示状态**。
+> 现状：**melonDS（NDS / DSi）是第一个真正用到 JIT 的核心** —— 它的库里同时编入 ARM64 dynarec 与解释器两条路径，
+> 设备拿得到可执行内存就走 JIT、拿不到就**自动退回解释器**（所以它不把 JIT 当启动硬条件，NDS 在任何设备上都打得开，只是速度不同）。
+> 3DS / Wii / Wii U 仍需 JIT 才能真正可用，目前尚未接入。
 
 ## 目录结构
 
@@ -207,6 +209,7 @@ Sources/
 │   ├── GSMGBACore.m            # mGBA 宿主适配（GBA / GB / GBC）
 │   ├── GSNestopiaCore.mm       # Nestopia 宿主适配（NES，ObjC++：Nestopia 是 C++）
 │   ├── GSSnesCore.mm           # Mesen-S 宿主适配（SNES，ObjC++：走 libretro 接口）
+│   ├── GSMelonDSCore.mm       # melonDS 宿主适配（NDS / DSi，ObjC++：走 libretro 接口）
 │   ├── GSBuiltCoresCompat.h    # 编译期开关：核心没编出来就降级为「不可用」
 │   └── Gameshell-Bridging-Header.h
 └── UI/                         # Swift：SwiftUI 界面
@@ -222,6 +225,7 @@ Resources/
 Vendor/mgba/                    # mGBA 源码（MPL-2.0），CI 里交叉编译成 arm64 静态库
 Vendor/nestopia/                # Nestopia 源码（GPL-2.0-or-later），同上
 Vendor/mesens/                  # Mesen-S 源码（GPL-3.0），同上
+Vendor/melonds/                 # melonDS 源码（GPL-3.0），同上（含 ARM64 JIT 分支）
 Scripts/build_cores.sh          # 编译核心 → build/cores/<平台>/（含 GSBuiltCores.h 开关）
 build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，不提交）
 
@@ -246,7 +250,9 @@ build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，�
 （画面 + 自绘虚拟手柄 + 声音；NES 画面 256×240，音频是单声道扩成立体声）；
 **Mesen-S（SNES）** 的宿主适配也已完成、CI 里交叉编译并链接通过，
 但**本机没有 iOS 工具链、尚未实机实测**（所以先按「已接入、待实机验证」对待，不写成「实测可玩」）；
-NDS / 3DS / Wii / Wii U 的**核心尚未接入**，业务功能仍在补。
+**melonDS（NDS / DSi）** 的宿主适配同样写完、CI 里交叉编译（含 ARM64 JIT）并链接通过，
+但**同样尚未实机实测**；它是第一个真正用到 JIT 的核心（拿得到走 dynarec、拿不到自动退回解释器）。
+3DS / Wii / Wii U 的**核心尚未接入**（都要 GL 硬件渲染宿主层、且都要 JIT），业务功能仍在补。
 逐项完成度请看 [REFERENCE.md](REFERENCE.md) 的「未完成清单」。
 
 ## 许可证
@@ -254,6 +260,6 @@ NDS / 3DS / Wii / Wii U 的**核心尚未接入**，业务功能仍在补。
 本仓库以 **GPL-3.0** 发布，全文见 [LICENSE](LICENSE)。
 `Vendor/` 下的第三方源码各自保留原许可：`Vendor/mgba`（mGBA）为 **MPL-2.0**，
 `Vendor/nestopia`（Nestopia）为 **GPL-2.0-or-later**（其每个源文件都写明可选用更高版本，
-所以能按 GPL-3.0 一并分发），`Vendor/mesens`（Mesen-S）为 **GPL-3.0**。
+所以能按 GPL-3.0 一并分发），`Vendor/mesens`（Mesen-S）为 **GPL-3.0**，`Vendor/melonds`（melonDS）为 **GPL-3.0**。
 **Snes9x 不引入**（非商用许可，与 GPL-3.0 不兼容）。
 第三方组件与接入进度在 [LICENSE](LICENSE) 末尾与 [REFERENCE.md](REFERENCE.md) 里如实列出。
