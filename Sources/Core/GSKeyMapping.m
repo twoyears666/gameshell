@@ -89,11 +89,75 @@ static NSString *GSGamepadLabel(NSString *identifier) {
     return map[identifier] ?: identifier;
 }
 
+#pragma mark - 按键簇布局
+
+/// 每个按键簇的稳定键名（持久化用）
+static NSString *GSTouchClusterKey(GSTouchCluster cluster) {
+    switch (cluster) {
+        case GSTouchClusterDPad:        return @"dpad";
+        case GSTouchClusterFace:        return @"face";
+        case GSTouchClusterL:           return @"L";
+        case GSTouchClusterR:           return @"R";
+        case GSTouchClusterStartSelect: return @"startSelect";
+    }
+    return @"";
+}
+
+static GSTouchCluster GSTouchClusterFromKey(NSString *key) {
+    for (NSNumber *number in [GSKeyMapping touchClusters]) {
+        GSTouchCluster cluster = (GSTouchCluster)number.integerValue;
+        if ([GSTouchClusterKey(cluster) isEqualToString: key]) {
+            return cluster;
+        }
+    }
+    return GSTouchClusterDPad;
+}
+
+/// 各按键簇的内置默认布局（归一化中心 + 缩放），对应播放器里的默认观感
+static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster) {
+    switch (cluster) {
+        case GSTouchClusterDPad:        return [GSTouchClusterLayout layoutWithX: 0.12 y: 0.78 scale: 1.0];
+        case GSTouchClusterFace:        return [GSTouchClusterLayout layoutWithX: 0.88 y: 0.78 scale: 1.0];
+        case GSTouchClusterL:           return [GSTouchClusterLayout layoutWithX: 0.11 y: 0.11 scale: 1.0];
+        case GSTouchClusterR:           return [GSTouchClusterLayout layoutWithX: 0.89 y: 0.11 scale: 1.0];
+        case GSTouchClusterStartSelect: return [GSTouchClusterLayout layoutWithX: 0.50 y: 0.94 scale: 1.0];
+    }
+    return [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
+}
+
+@implementation GSTouchClusterLayout
+
++ (instancetype)layoutWithX:(CGFloat)x y:(CGFloat)y scale:(CGFloat)scale {
+    GSTouchClusterLayout *layout = [[GSTouchClusterLayout alloc] init];
+    layout.x = x;
+    layout.y = y;
+    layout.scale = scale;
+    return layout;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _x = 0.5;
+        _y = 0.5;
+        _scale = 1.0;
+    }
+    return self;
+}
+
+- (id)copyWithZone:(NSZone *)zone {
+    return [GSTouchClusterLayout layoutWithX: self.x y: self.y scale: self.scale];
+}
+
+@end
+
 #pragma mark -
 
 @interface GSKeyMapping ()
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *keyboardBindings;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *gamepadBindings;
+/// 用户自定义过的按键簇布局（key = GSTouchCluster 的 NSNumber）；没存进来的就是内置默认
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *touchLayouts;
 
 + (NSDictionary<NSString *, NSNumber *> *)defaultKeyboardBindings;
 + (NSDictionary<NSString *, NSString *> *)defaultGamepadBindings;
@@ -119,6 +183,7 @@ static NSString *GSGamepadLabel(NSString *identifier) {
         [self applyDefaultTouchProfile];
         _keyboardBindings = [[GSKeyMapping defaultKeyboardBindings] mutableCopy];
         _gamepadBindings = [[GSKeyMapping defaultGamepadBindings] mutableCopy];
+        _touchLayouts = [NSMutableDictionary dictionary];
         [self loadFromDisk];
     }
     return self;
@@ -169,6 +234,51 @@ static NSString *GSGamepadLabel(NSString *identifier) {
 
 - (void)setTouchOpacity:(CGFloat)touchOpacity {
     _touchOpacity = MAX((CGFloat)0.3, MIN((CGFloat)1.0, touchOpacity));
+}
+
+#pragma mark - 触屏按键簇布局
+
++ (NSArray<NSNumber *> *)touchClusters {
+    return @[
+        @(GSTouchClusterDPad), @(GSTouchClusterFace),
+        @(GSTouchClusterL), @(GSTouchClusterR),
+        @(GSTouchClusterStartSelect),
+    ];
+}
+
++ (NSString *)displayNameForCluster:(GSTouchCluster)cluster {
+    switch (cluster) {
+        case GSTouchClusterDPad:        return @"十字键";
+        case GSTouchClusterFace:        return @"A / B";
+        case GSTouchClusterL:           return @"L 肩键";
+        case GSTouchClusterR:           return @"R 肩键";
+        case GSTouchClusterStartSelect: return @"START / SELECT";
+    }
+    return @"按键簇";
+}
+
+- (GSTouchClusterLayout *)layoutForCluster:(GSTouchCluster)cluster {
+    GSTouchClusterLayout *layout = self.touchLayouts[@(cluster)];
+    return layout != nil ? layout : GSDefaultLayoutForCluster(cluster);
+}
+
+- (void)setLayout:(GSTouchClusterLayout *)layout forCluster:(GSTouchCluster)cluster {
+    if (layout == nil) {
+        return;
+    }
+    // 值域收在这里，播放器与设置页都不必再各自夹一遍
+    self.touchLayouts[@(cluster)] = [GSTouchClusterLayout layoutWithX: MAX((CGFloat)0.0, MIN((CGFloat)1.0, layout.x))
+                                                                     y: MAX((CGFloat)0.0, MIN((CGFloat)1.0, layout.y))
+                                                                 scale: MAX((CGFloat)0.6, MIN((CGFloat)1.6, layout.scale))];
+}
+
+- (BOOL)hasCustomTouchLayout {
+    return self.touchLayouts.count > 0;
+}
+
+- (void)resetTouchLayouts {
+    [self.touchLayouts removeAllObjects];
+    [self persist];
 }
 
 #pragma mark - 默认键位
@@ -324,6 +434,7 @@ static NSString *GSGamepadLabel(NSString *identifier) {
         },
         @"keyboard": [self.keyboardBindings copy],
         @"gamepad": [self.gamepadBindings copy],
+        @"layouts": [self touchLayoutsRepresentation],
     };
 }
 
@@ -380,6 +491,24 @@ static NSString *GSGamepadLabel(NSString *identifier) {
         self.keyboardBindings = loaded;
     }
 
+    NSDictionary *layouts = dictionary[@"layouts"];
+    if ([layouts isKindOfClass: [NSDictionary class]]) {
+        NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *loaded = [NSMutableDictionary dictionary];
+        for (id key in layouts) {
+            id entry = layouts[key];
+            if (![key isKindOfClass: [NSString class]] || ![entry isKindOfClass: [NSDictionary class]]) {
+                continue;
+            }
+            NSDictionary *values = entry;
+            GSTouchClusterLayout *layout = [GSTouchClusterLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
+            if ([values[@"x"] isKindOfClass: [NSNumber class]]) { layout.x = [values[@"x"] doubleValue]; }
+            if ([values[@"y"] isKindOfClass: [NSNumber class]]) { layout.y = [values[@"y"] doubleValue]; }
+            if ([values[@"scale"] isKindOfClass: [NSNumber class]]) { layout.scale = [values[@"scale"] doubleValue]; }
+            loaded[@(GSTouchClusterFromKey(key))] = layout;
+        }
+        self.touchLayouts = loaded;
+    }
+
     NSDictionary *gamepad = dictionary[@"gamepad"];
     if ([gamepad isKindOfClass: [NSDictionary class]]) {
         NSMutableDictionary<NSString *, NSString *> *loaded = [NSMutableDictionary dictionary];
@@ -393,8 +522,26 @@ static NSString *GSGamepadLabel(NSString *identifier) {
     }
 }
 
+/// 按键簇布局的持久化形式：没自定义过的簇不写盘，读回时自然回落内置默认值
+- (NSDictionary *)touchLayoutsRepresentation {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSNumber *number in [GSKeyMapping touchClusters]) {
+        GSTouchClusterLayout *layout = self.touchLayouts[number];
+        if (layout == nil) {
+            continue;
+        }
+        result[GSTouchClusterKey((GSTouchCluster)number.integerValue)] = @{
+            @"x": @(layout.x),
+            @"y": @(layout.y),
+            @"scale": @(layout.scale),
+        };
+    }
+    return result;
+}
+
 - (void)resetToDefaults {
     [self applyDefaultTouchProfile];
+    [self.touchLayouts removeAllObjects];
     self.keyboardBindings = [[GSKeyMapping defaultKeyboardBindings] mutableCopy];
     self.gamepadBindings = [[GSKeyMapping defaultGamepadBindings] mutableCopy];
     [self persist];

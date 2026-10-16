@@ -30,4 +30,8 @@
 #define GS_HAVE_MESENS 0
 #endif
 
+#ifndef GS_HAVE_MELONDS
+#define GS_HAVE_MELONDS 0
+#endif
+
 #endif /* GS_BUILT_CORES_COMPAT_H */

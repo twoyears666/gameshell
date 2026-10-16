@@ -69,6 +69,7 @@
 | **URL 条目导入本地图标**（「添加」里选图片，写入沙盒 `Documents/Icons/`） | ✅ 已实现 | `AddGameForm.swift` + `GSIconStore` |
 | **模拟器 ROM 自动抓取官方封面**（libretro-thumbnails `Named_Boxarts`，命中即缓存到 `Documents/Covers/`） | ⚠️ 待实机验证（联网抓取，本机无 iOS SDK，端到端未验证） | `GSCoverFetcher` + `AppState.refreshROMCovers` |
 | **设置页：三端键位**（触屏缩放 / 透明度 / 按键簇显隐、键盘、手柄；改完即生效并持久化） | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
+| **设置页：触屏布局编辑器**（拖拽移动每一簇、双指或滑杆调整大小；入口**只在设置页**，游玩界面不可编辑） | ✅ 已实现 | `TouchLayoutEditor.swift` + `VirtualControls.swift` + `GSKeyMapping` |
 | 模拟器内三端按键转发（触屏虚拟手柄 + 硬件键盘 + 手柄 → 单一 `GSButton` 位掩码 → 核心） | ✅ 已实现 | `EmulatorInputCoordinator.swift` + `KeyboardCapture.swift` + `GSInputManager` |
 | 深链 `gameshell://home / open / play`（`search` 已移除，收到时提示） | ✅ 已实现 | `GSGameLauncher.m` + `GameshellApp.swift` + `AppState.handle(url:)` |
 | 自绘浮层（toast / confirm / 表单），**不使用系统弹窗** | ✅ 已实现 | `Sources/UI/Overlay/` |
@@ -76,17 +77,18 @@
 | 键鼠在线探测（GCKeyboard / GCMouse，iOS 14+） | ✅ 已实现 | `GSInputManager.m` |
 | GitHub Actions CI（iOS 真机 + macOS 编译） | ✅ 已实现 | `.github/workflows/build.yml` |
 | IPA 打包（`Payload/Gameshell.app` → `.ipa`） | ✅ 已实现（**ad-hoc 自签名**，非开发者证书签名） | `.github/workflows/build.yml` |
-| TrollStore 用的 `.tipa` | ✅ 已实现（在最小 entitlements 之上**额外带 JIT entitlements**，TrollStore 安装时保留） | `.github/workflows/build.yml` + `Signing/Gameshell-iOS-JIT.entitlements` |
+| TrollStore 用的 `.tipa` | ✅ 已实现（在最小 entitlements 之上带 **TrollStore 原生 JIT entitlements**，见下） | `.github/workflows/build.yml` + `Signing/Gameshell-iOS-JIT.entitlements` |
 | **模拟器：ROM 导入**（App 内文件选择器 → 复制进沙盒 `Documents/ROMs/<系统>/`，重名加序号不覆盖） | ✅ 已实现（iOS） | `Sources/Core/GSROMLibrary.m` + `Sources/UI/Overlay/ImportROMSheet.swift` |
 | **模拟器：GBA / GB / GBC 实机模拟**（mGBA 静态链接进主二进制） | ✅ 已实现（iOS） | `Sources/Core/GSMGBACore.m` + `Sources/Core/GSEmulator.m` |
 | **模拟器：NES 实机模拟**（Nestopia 静态链接进主二进制；256×240 RGBA 画面 + 单声道扩立体声 + 电池存档） | ✅ 已实现（iOS），CI 已确认 `libnestopia.a` 编出并链接通过 | `Sources/Core/GSNestopiaCore.mm` + `Sources/Core/GSEmulator.m` |
 | **模拟器：SNES 实机模拟**（Mesen-S 静态链接进主二进制；XRGB8888 → RGBA8888 逐像素转换 + 可变分辨率重分配缓冲 + 32040Hz 交错立体声 + 宿主侧 SRAM 落盘） | ⚠️ **代码已写完、CI 编译链接通过，但尚未实机实测**（详见下方「诚实补一句」） | `Sources/Core/GSSnesCore.mm` + `Sources/Core/GSEmulator.m` |
 | **模拟器：画面输出**（核心出 RGBA8888 → CGImage，`CADisplayLink` 按屏幕刷新率取最新帧） | ✅ 已实现（iOS） | `GSEmulator.m` + `EmulatorView.EmulatorFrameSource` |
 | **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
-| **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` |
+| **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R；每簇位置与大小由 `GSTouchClusterLayout` 归一化坐标决定，可在设置页调整） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSKeyMapping.m` |
 | **模拟器：ROM 并入游戏库**（统一方块行，卡片带系统徽标 / 封面）+ 设置页「核心接入状态表」 | ✅ 已实现（iOS） | `Sources/UI/Components/LibraryItem.swift` + `Sources/UI/Components/GameCard.swift` + `Sources/UI/Emulator/CoreStatusList.swift` |
 | **模拟器：JIT 能力探测**（真的去 `mmap(MAP_JIT)` 试探）+ TrollStore 探测 | ✅ 已实现 | `GSJIT`（`Sources/Core/GSEmulator.m`） |
-| **TrollStore tipa 内置 JIT entitlements**（`dynamic-codesigning` + `com.apple.private.cs.debugger`） | ✅ 已实现（⚠️ 这些 entitlement 在 iOS 15 + A12+ 被封禁，带它们签名的 App 在那些系统上可能崩溃；故只签进 tipa、普通 IPA 不带） | `Signing/Gameshell-iOS-JIT.entitlements` + `.github/workflows/build.yml` |
+| **TrollStore 原生 JIT 自举**（带 `no-sandbox` 时，`__attribute__((constructor))` 抢在 `UIApplicationMain` 前 spawn 自身、子进程 `ptrace(PT_TRACE_ME)`，父子拿到 `CS_DEBUGGED` → `mmap(MAP_JIT)` 成立；照 Amethyst-iOS / UTM） | ⚠️ 代码已写完、CI 编译链接通过，**尚未实机验证**（本机无 iOS 工具链） | `Sources/Core/GSEmulator.m`（`GSJITBootstrapIfNeeded`） |
+| **TrollStore tipa 内置 JIT entitlements**（**不再**用被封禁的 `dynamic-codesigning` / `com.apple.private.cs.debugger`；改用 `com.apple.private.security.no-sandbox` + `platform-application` + `storage.AppDataContainers`/`MobileDocuments` + 内存 / IOKit / mach-lookup 一套，照 Amethyst-iOS） | ✅ 已实现（⚠️ 代价：tipa 装好后**脱离沙盒**，`Documents` 可能不再解析到自己的容器，异常时需按 `HOME` 兜底；只签进 tipa，普通 IPA / macOS 不带） | `Signing/Gameshell-iOS-JIT.entitlements` + `.github/workflows/build.yml` |
 | **模拟器：核心编译期降级**（某个核心没编出来 → 该项目如实标成「不可用」，不拖垮整个构建） | ✅ 已实现 | `Scripts/build_cores.sh` + `Sources/Core/GSBuiltCoresCompat.h` |
 
 > **诚实补一句**：上表「已实现」指的是**代码已写完并进入 CI 构建**。

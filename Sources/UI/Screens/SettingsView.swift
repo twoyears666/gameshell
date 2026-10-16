@@ -17,6 +17,8 @@ struct SettingsView: View {
 
     #if os(iOS)
     @StateObject private var capture = GSBindingCapture()
+    /// 是否打开「触屏布局编辑器」覆盖层（入口只在设置页，游玩界面不提供）
+    @State private var showsLayoutEditor = false
     #endif
 
     var body: some View {
@@ -26,7 +28,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     #if os(iOS)
-                    TouchSettingsCard(mapping: state.keyMapping)
+                    TouchSettingsCard(mapping: state.keyMapping) { showsLayoutEditor = true }
                     KeyboardSettingsCard(mapping: state.keyMapping, capture: capture)
                     GamepadSettingsCard(mapping: state.keyMapping, capture: capture)
                     CoreIntegrationCard()
@@ -43,7 +45,18 @@ struct SettingsView: View {
         }
         .background(Theme.Color.background)
         .overlay { captureLayer }
+        .overlay { layoutEditorLayer }
         .transition(.opacity)
+    }
+
+    /// 触屏布局编辑器覆盖层（仅 iOS，只有设置页能打开）
+    @ViewBuilder
+    private var layoutEditorLayer: some View {
+        #if os(iOS)
+        if showsLayoutEditor {
+            TouchLayoutEditor(mapping: state.keyMapping) { showsLayoutEditor = false }
+        }
+        #endif
     }
 
     private var headerSubtitle: String {
@@ -326,6 +339,8 @@ private struct SettingsCard<Content: View>: View {
 
 private struct TouchSettingsCard: View {
     let mapping: GSKeyMapping
+    /// 打开布局编辑器（拖拽移动 / 调整大小）
+    let onEditLayout: () -> Void
 
     @State private var scale: CGFloat
     @State private var opacity: CGFloat
@@ -334,8 +349,9 @@ private struct TouchSettingsCard: View {
     @State private var showShoulders: Bool
     @State private var showStartSelect: Bool
 
-    init(mapping: GSKeyMapping) {
+    init(mapping: GSKeyMapping, onEditLayout: @escaping () -> Void) {
         self.mapping = mapping
+        self.onEditLayout = onEditLayout
         _scale = State(initialValue: mapping.touchScale)
         _opacity = State(initialValue: mapping.touchOpacity)
         _showDPad = State(initialValue: mapping.touchShowDPad)
@@ -345,7 +361,7 @@ private struct TouchSettingsCard: View {
     }
 
     var body: some View {
-        SettingsCard(title: "触屏手柄", subtitle: "缩放、透明度与各按键簇是否显示") {
+        SettingsCard(title: "触屏手柄", subtitle: "缩放、透明度、各按键簇是否显示，以及每簇的位置与大小") {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 slider(title: "缩放",
                        value: $scale,
@@ -365,6 +381,10 @@ private struct TouchSettingsCard: View {
                 toggle(title: "显示 A / B", isOn: $showFace) { mapping.touchShowFace = $0 }
                 toggle(title: "显示 L / R", isOn: $showShoulders) { mapping.touchShowShoulders = $0 }
                 toggle(title: "显示 START / SELECT", isOn: $showStartSelect) { mapping.touchShowStartSelect = $0 }
+
+                // 每簇的位置与大小（拖拽移动、双指或滑杆缩放）只在设置页的布局编辑器里调
+                PillButton(title: "编辑布局（拖动位置 / 调整大小）", style: .secondary, action: onEditLayout)
+                    .padding(.top, Theme.Spacing.xxs)
             }
         }
     }

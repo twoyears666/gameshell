@@ -2,17 +2,28 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!--
-  只给 TrollStore 的 .tipa 用的 entitlements：在最小集之上加 JIT 相关项。
-  TrollStore 安装 IPA 时会保留二进制自带的 entitlements，所以这份文件里的
-  JIT 项会随 tipa 一起被保留下来，装好后无需再手动开一次 JIT。
+  只给 TrollStore 的 .tipa 用的 entitlements：在最小集之上加「TrollStore 原生 JIT」这一套。
+  用户已明确确认采用本方案（对应 Amethyst-iOS / UTM 的做法），并知悉其代价。
 
-  ⚠️ 诚实说明（见 REFERENCE.md）：
-  TrollStore 官方文档把 dynamic-codesigning 与 com.apple.private.cs.debugger
-  列为「iOS 15 + A12 及以上被封禁的 entitlement」——带这两项签名的 App 在这些
-  系统上可能启动即崩。因此：
-    · 普通 IPA 用最小集（Gameshell-iOS.entitlements），不带 JIT 项；
-    · 只有这个 tipa 带 JIT 项，供 TrollStore / 支持这些 entitlement 的环境使用。
-  正规开发者证书签名时不要用这份文件（那份由描述文件决定）。
+  为什么不再用 dynamic-codesigning / com.apple.private.cs.debugger：
+  iOS 15 + A12 起，系统把这两项列为被封禁的 entitlement，带它们签名的 App 可能启动即崩；
+  在较高系统版本（iOS 15/16、以及 ≤17.0）的 TrollStore 上，正确做法是——
+    · 给 App 加 com.apple.private.security.no-sandbox（以及随之必需的存储类 entitlement），
+      让 App 脱离沙盒；
+    · 运行时由 App 自己「spawn 一个子进程，子进程 ptrace(PT_TRACE_ME)」拿到 CS_DEBUGGED，
+      于是 mmap(MAP_JIT) 成立，JIT 可用。
+  这套 entitlement 集与代码路径照抄 AngelAuraMC/Amethyst-iOS（entitlements.trollstore.xml +
+  Natives/main.m）与 UTM（Services/UTMJailbreak.m）的做法；官方文档说明 TrollStore 安装后
+  「自动开启 JIT」，无需再外挂 StikDebug（iOS 26+ / TXM 机型才需要）。
+
+  ⚠️ 已知副作用（务必知悉）：
+    · no-sandbox 之后 App 不再被关进自己的沙盒容器，NSDocumentDirectory 可能不再解析到
+      自己的容器（Amethyst 会按 HOME 重定位）。Gameshell 的 ROMs/ 存档/ keymap.json 都在
+      Documents 下，若真机上发现路径异常，需要按同一思路兜底。
+    · platform-application 会让部分沙盒策略更严，因此必须补上 storage.AppDataContainers /
+      storage.MobileDocuments，否则读写自己的数据目录会被拦。
+    · 这份文件只用于 TrollStore 的 tipa；普通 IPA 用最小集 Gameshell-iOS.entitlements，
+      正规开发者证书签名时也不要使用本文件（那份由描述文件决定）。
 -->
 <dict>
 	<key>application-identifier</key>
@@ -23,10 +34,41 @@
 	</array>
 	<key>get-task-allow</key>
 	<true/>
-	<!-- JIT：允许运行时生成可执行代码 -->
-	<key>dynamic-codesigning</key>
+
+	<!-- ===== TrollStore 原生 JIT：核心几项 ===== -->
+	<!-- 脱离沙盒，App 才能自己 ptrace 子进程开 JIT -->
+	<key>com.apple.private.security.no-sandbox</key>
 	<true/>
-	<key>com.apple.private.cs.debugger</key>
+	<!-- 与 platform-application 配套，缺了就读写不了自己的数据目录 -->
+	<key>com.apple.private.security.storage.AppDataContainers</key>
 	<true/>
+	<key>com.apple.private.security.storage.MobileDocuments</key>
+	<true/>
+	<key>platform-application</key>
+	<true/>
+	<!-- 内存 / 虚拟地址空间上限（模拟器核心需要） -->
+	<key>com.apple.developer.kernel.increased-memory-limit</key>
+	<true/>
+	<key>com.apple.developer.kernel.extended-virtual-addressing</key>
+	<true/>
+	<!-- 允许自己改 Jetsam 内存限制 -->
+	<key>com.apple.private.memorystatus</key>
+	<true/>
+	<!-- 图形（Metal / IOSurface）用户客户端 -->
+	<key>com.apple.security.iokit-user-client-class</key>
+	<array>
+		<string>IOSurfaceRootUserClient</string>
+		<string>AGXDeviceUserClient</string>
+		<string>AGXSharedUserClient</string>
+		<string>AGXCommandQueue</string>
+		<string>AGXDevice</string>
+	</array>
+	<!-- 沙盒外仍要能访问网络（URL 类游戏页面加载） -->
+	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.nsurlsessiond</string>
+		<string>com.apple.nsurlsessiond.NSURLSessionProxyService</string>
+		<string>com.apple.nsurlstorage-cache</string>
+	</array>
 </dict>
 </plist>

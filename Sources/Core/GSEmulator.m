@@ -33,6 +33,11 @@ extern id<GSEmulatorCore> GSNestopiaCoreCreate(void);
 extern id<GSEmulatorCore> GSSnesCoreCreate(void);
 #endif
 
+#if GS_HAVE_MELONDS
+/// 实现在 GSMelonDSCore.mm（ObjC++：melonDS 是 C++ 库，走 libretro 接口）
+extern id<GSEmulatorCore> GSMelonDSCoreCreate(void);
+#endif
+
 NSString *const GSEmulatorErrorDomain = @"GSEmulatorErrorDomain";
 
 typedef NS_ENUM(NSInteger, GSEmulatorErrorCode) {
@@ -40,6 +45,130 @@ typedef NS_ENUM(NSInteger, GSEmulatorErrorCode) {
     GSEmulatorErrorCodeJITRequired,
     GSEmulatorErrorCodeLoadFailed,
 };
+
+#pragma mark - TrollStore JIT 自举（仅 iOS）
+
+#if TARGET_OS_IPHONE
+
+// 在较高系统的 TrollStore 上，dynamic-codesigning / com.apple.private.cs.debugger 已被封禁，
+// 想自己开 JIT 只剩一条路：App 带 com.apple.private.security.no-sandbox，
+// 运行时「spawn 一个自己的子进程，子进程 ptrace(PT_TRACE_ME)」——
+// 这样父子进程都拿到 CS_DEBUGGED，mmap(MAP_JIT) 于是成立。
+// 做法照 AngelAuraMC/Amethyst-iOS（Natives/main.m）与 UTM（Services/UTMJailbreak.m）。
+//
+// 要点：
+//   · 必须在 UIApplicationMain 之前跑完 → 用 __attribute__((constructor))（SwiftUI 的 @main App
+//     已把 main() 生成掉了，没有别的插入点）；
+//   · 子进程靠哨兵参数识别，只做 ptrace 后立刻 _exit(0)，绝不进入 UIApplicationMain，避免起两份界面；
+//   · 只有带 no-sandbox entitlement 时才做（普通 IPA / macOS 没有，直接跳过）；
+//   · 已经能 mmap(MAP_JIT) 就不做，避免白 spawn 一次。
+//
+// ⚠️ no-sandbox 之后 NSDocumentDirectory 可能不再解析到自己的容器；本 App 的 ROMs/ 存档/
+//    keymap.json 都在 Documents 下。若真机上发现路径异常，需要按 HOME 重新定位（Amethyst 的兜底方式）。
+
+#import <crt_externs.h>
+#import <Security/Security.h>
+#import <spawn.h>
+#import <signal.h>
+#import <sys/wait.h>
+#import <errno.h>
+#import <string.h>
+
+extern char **environ;
+
+// 私有 API：从自身读 entitlement（声明照 Amethyst 的 utils.m）
+CFTypeRef SecTaskCopyValueForEntitlement(void *task, NSString *entitlement, CFErrorRef _Nullable *error);
+void *SecTaskCreateFromSelf(CFAllocatorRef allocator);
+
+// ptrace 在 iOS 公开 SDK 里未声明，照 Amethyst 自行声明
+#define GS_PT_TRACE_ME 0
+#define GS_PT_DETACH 11
+int ptrace(int, pid_t, caddr_t, int);
+
+/// 子进程识别用的哨兵参数
+static const char *const GSJITChildSentinel = "gameshell-jit-child";
+
+/// 本进程是否带指定 entitlement
+static BOOL GSProcessHasEntitlement(NSString *key) {
+    void *task = SecTaskCreateFromSelf(NULL);
+    if (task == NULL) {
+        return NO;
+    }
+    CFTypeRef value = SecTaskCopyValueForEntitlement(task, key, NULL);
+    CFRelease(task);
+    if (value == NULL) {
+        return NO;
+    }
+    CFRelease(value);
+    return YES;
+}
+
+/// 真正的 JIT 判据：能不能 mmap(MAP_JIT)
+static BOOL GSProbeMapJIT(void) {
+#if defined(MAP_JIT)
+    size_t page = (size_t)getpagesize();
+    void *pointer = mmap(NULL, page, PROT_READ | PROT_WRITE | PROT_EXEC,
+                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
+    if (pointer == MAP_FAILED) {
+        return NO;
+    }
+    munmap(pointer, page);
+    return YES;
+#else
+    return NO;
+#endif
+}
+
+static void GSJITBootstrapIfNeeded(void) {
+    // 只在 TrollStore 这种「带 no-sandbox」的环境里自举；普通 IPA / macOS 直接跳过
+    if (!GSProcessHasEntitlement(@"com.apple.private.security.no-sandbox")) {
+        return;
+    }
+
+    int *argcPointer = _NSGetArgc();
+    char ***argvPointer = _NSGetArgv();
+    char **argv = argvPointer ? *argvPointer : NULL;
+    if (argcPointer == NULL || argv == NULL || argv[0] == NULL) {
+        return;
+    }
+
+    // 子进程：只做 ptrace(PT_TRACE_ME)，让父子都拿到 CS_DEBUGGED，然后立刻退出
+    if (*argcPointer >= 2 && argv[1] != NULL &&
+        strcmp(argv[1], GSJITChildSentinel) == 0) {
+        ptrace(GS_PT_TRACE_ME, 0, 0, 0);
+        _exit(0);
+    }
+
+    // 已经能 mmap(MAP_JIT) 就什么都不用做
+    if (GSProbeMapJIT()) {
+        return;
+    }
+
+    pid_t child = 0;
+    char *childArgv[] = { argv[0], (char *)GSJITChildSentinel, NULL };
+    int result = posix_spawnp(&child, argv[0], NULL, NULL, childArgv, environ);
+    if (result != 0) {
+        NSLog(@"[GSJIT] 自举失败：posix_spawnp 返回 %d（errno %d）", result, errno);
+        return;
+    }
+    waitpid(child, NULL, WUNTRACED);
+    ptrace(GS_PT_DETACH, child, NULL, 0);
+    kill(child, SIGTERM);
+    wait(NULL);
+
+    if (GSProbeMapJIT()) {
+        NSLog(@"[GSJIT] TrollStore 自举成功：已可通过 PT_TRACE_ME 拿到 JIT");
+    } else {
+        NSLog(@"[GSJIT] 自举后仍拿不到 JIT（可能是 iOS 26+/TXM 机型，需要外挂 StikDebug）");
+    }
+}
+
+__attribute__((constructor))
+static void GSJITBootstrapConstructor(void) {
+    GSJITBootstrapIfNeeded();
+}
+
+#endif
 
 #pragma mark - JIT
 
@@ -198,6 +327,11 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         return GSSnesCoreCreate();
     }
 #endif
+#if GS_HAVE_MELONDS
+    if (system == GSSystemNDS) {
+        return GSMelonDSCoreCreate();
+    }
+#endif
     return nil;
 }
 
@@ -217,6 +351,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 #endif
 #if GS_HAVE_MESENS
         dict[@(GSSystemSNES)] = @"Mesen-S";
+#endif
+#if GS_HAVE_MELONDS
+        dict[@(GSSystemNDS)] = @"melonDS";
 #endif
         names = [dict copy];
     });

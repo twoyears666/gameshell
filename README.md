@@ -5,7 +5,7 @@
 本仓库以「壳 + 启动通路」为主；模拟器部分**已接入 mGBA、Nestopia 与 Mesen-S**（GBA / GB / GBC / NES / SNES），其余系统**尚未接入**。
 功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
 
-- **主界面**：顶栏 + 顶排「最近游玩」（最多 10 个）+ 「游戏库」方块行（URL 条目与模拟器 ROM 混排）；另有**设置页**（触屏 / 键盘 / 手柄三端键位）
+- **主界面**：顶栏 + 顶排「最近游玩」（最多 10 个）+ 「游戏库」方块行（URL 条目与模拟器 ROM 混排）；另有**设置页**（触屏 / 键盘 / 手柄三端键位，触屏还能拖拽调位置与大小）
 - **技术栈**：Swift（SwiftUI，UI 层）+ Objective-C（核心层）混合
 - **游戏来源**：完全 **URL 驱动** —— 打开一个 URL 就等于打开一个游戏或 App；
   `http(s)` 用内置 WebView 打开，`steam://` 这类 scheme 交给系统**唤起对应 App**
@@ -15,7 +15,7 @@
   **不内置任何 ROM**，全部由你自己导入（App 内导入，或从「文件」App 拷进 `Documents/ROMs/<系统>/`）
 - **已接入的核心**：**mGBA**（GBA / GB / GBC）+ **Nestopia**（NES）+ **Mesen-S**（SNES）；NDS / 3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
 - **游戏封面**：URL 条目可在「添加」时**导入本地图标**；模拟器 ROM 会**自动联网抓取官方封面**（libretro-thumbnails 的 `Named_Boxarts`），命中即缓存，未命中回退到系统徽标，不报错
-- **键位设置**：右上角齿轮进设置页，可分别调整**触屏**（缩放 / 透明度 / 各按键簇显隐）、**键盘**、**手柄**三端键位，改完即生效并持久化
+- **键位设置**：右上角齿轮进设置页，可分别调整**触屏**（缩放 / 透明度 / 各按键簇显隐，并在「编辑布局」里**拖拽移动每一簇、调整其大小**）、**键盘**、**手柄**三端键位，改完即生效并持久化
 - **虚拟手柄**：操控界面自绘（布局参照 Delta / manic emu），**不借鉴 RetroArch 的触屏 UI**
 - **第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
 - **输入**：**手柄**（GameController 框架，热插拔）与 **键鼠**都能被识别；模拟器内触屏 / 键盘 / 手柄三端按键会汇总成一份位掩码转发给核心
@@ -65,7 +65,7 @@ xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
 | --- | --- | --- |
 | `Gameshell-macOS` | macOS `.app` | **ad-hoc 自签名** |
 | `Gameshell-IPA` | iOS 真机 `.ipa`（`Payload/Gameshell.app`） | **ad-hoc 自签名 + 最小 entitlements**，非开发者证书签名 |
-| `Gameshell-TrollStore-tipa` | iOS 真机 `.tipa`：在最小集之上**额外带 JIT entitlements**（`dynamic-codesigning` + `com.apple.private.cs.debugger`），TrollStore 安装时会保留，装好即具备 JIT | **ad-hoc 自签名 + JIT entitlements**，非开发者证书签名 |
+| `Gameshell-TrollStore-tipa` | iOS 真机 `.tipa`：带 **TrollStore 原生 JIT entitlements**（`com.apple.private.security.no-sandbox` 等；**不再**用被封禁的 `dynamic-codesigning` / `com.apple.private.cs.debugger`），运行时会自我开 JIT | **ad-hoc 自签名 + TrollStore JIT entitlements**，非开发者证书签名 |
 
 > ⚠️ **诚实说明**：CI 产出的 IPA / tipa 是 **未签名 + `codesign -s -` ad-hoc 自签名** 的包
 > （普通 IPA 用 [Signing/Gameshell-iOS.entitlements](Signing/Gameshell-iOS.entitlements)，tipa 用 [Signing/Gameshell-iOS-JIT.entitlements](Signing/Gameshell-iOS-JIT.entitlements)），
@@ -73,7 +73,12 @@ xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
 > **不能**直接装到未越狱设备、也**不能**上架 App Store。
 > 正规签名的 IPA 需要 Apple 开发者证书与描述文件，属于**未完成**部分（见 [REFERENCE.md](REFERENCE.md)）。
 >
-> ⚠️ **JIT 的代价**：`dynamic-codesigning` 与 `com.apple.private.cs.debugger` 在 **iOS 15 + A12 及以上**被系统列为**封禁 entitlement**，带它们签名的 App 在那些系统上**可能启动即崩**。因此 JIT 只签进 tipa、普通 IPA 不带；在这些系统上请改用 TrollStore 的「开启 JIT」或 StikDebug。
+> ⚠️ **JIT 与沙盒的代价**：tipa **不再**使用被封禁的 `dynamic-codesigning` / `com.apple.private.cs.debugger`
+> （它们在 **iOS 15 + A12 及以上**会让 App 启动即崩），改用 **TrollStore 原生方案**（照 Amethyst-iOS / UTM）：
+> 签上 `com.apple.private.security.no-sandbox`（+ `platform-application` + `storage.*`）等 entitlement，
+> 运行时由 App 自己 spawn 子进程 `ptrace(PT_TRACE_ME)` 拿到 `CS_DEBUGGED`，于是 `mmap(MAP_JIT)` 成立。
+> **代价**：tipa 版本**脱离沙盒**，`Documents` 可能不再解析到 App 自己的容器（若真机发现路径异常需按 `HOME` 兜底）。
+> 普通 IPA 不带这些项、保持沙盒；iOS 26+/TXM 机型仍需外挂 StikDebug。
 
 安装注意：
 
@@ -168,14 +173,21 @@ iOS 15 + A12 起系统封禁了 `dynamic-codesigning` 与 `com.apple.private.cs.
 
 ### JIT（3DS / Wii / Wii U 必需）
 
-需要 JIT 的平台，App 会在启动前**真实探测**（直接在进程里 `mmap(MAP_JIT)` 试探）；拿不到可执行内存时如实提示，并给出两条开启路径：
+需要 JIT 的平台，App 会在启动前**真实探测**（直接在进程里 `mmap(MAP_JIT)` 试探）；拿不到可执行内存时如实提示，并给出开启路径：
 
-1. **TrollStore（巨魔）安装**：装好后即为 App 打开了 JIT 权限。若进 App 仍提示未开，点提示条上的「开启 JIT」——
-   App 会用 `apple-magnifier://enable-jit?bundle-id=<本 App bundle-id>` 拉起 TrollStore 开一次，回到 App 点「重试」。
-   另外，CI 产出的 `Gameshell-TrollStore-tipa` 已**内置 JIT entitlements**（TrollStore 安装时会保留），装好通常即带 JIT。
+1. **TrollStore（巨魔）安装**：CI 产出的 `Gameshell-TrollStore-tipa` 带的是 **TrollStore 原生 JIT entitlements**
+   （`com.apple.private.security.no-sandbox` + `platform-application` + `storage.*` 等；**不再**使用被封禁的
+   `dynamic-codesigning` / `com.apple.private.cs.debugger`）。装上后 App 会在启动瞬间**自己开 JIT**：
+   用 `__attribute__((constructor))` 抢在 `UIApplicationMain` 之前，spawn 一个自己的子进程、子进程
+   `ptrace(PT_TRACE_ME)`，父子都拿到 `CS_DEBUGGED`，于是 `mmap(MAP_JIT)` 成立（做法照 Amethyst-iOS / UTM）。
+   若这样仍拿不到（例如 iOS 26+/TXM 机型），退回到点提示条上的「开启 JIT」——App 用
+   `apple-magnifier://enable-jit?bundle-id=<本 App bundle-id>` 拉起 TrollStore 开一次，回到 App 点「重试」。
 2. **普通侧载（没有 TrollStore）**：用 **StikDebug** 附加调试器后再启动 App，由调试器授予 JIT。
 
-> 现状：**目前还没有任何依赖 JIT 的核心真正接入**，上面两条路径是为后续接入准备的；现在 JIT 探测结果只用于**如实展示状态**。
+> ⚠️ 代价：tipa 因为要 `no-sandbox` 才能自开 JIT，装好后 App 会**脱离沙盒**，`Documents` 可能不再解析到自己的容器
+> （若真机发现路径异常，需要按 `HOME` 兜底）。普通 IPA / macOS 不带这些项，保持沙盒。
+
+> 现状：**目前还没有任何依赖 JIT 的核心真正接入**，上面这些是为后续接入准备的；现在 JIT 探测结果只用于**如实展示状态**。
 
 ## 目录结构
 
@@ -200,7 +212,7 @@ Sources/
 └── UI/                         # Swift：SwiftUI 界面
     ├── Theme.swift             # 设计令牌（颜色/圆角/间距/字号/尺寸）
     ├── Components/             # 顶栏、方块卡片（PS5 风格）、封面（远程/本地/徽标三态）
-    ├── Screens/                # 主界面 / 设置页 / 播放器（WebView）/ 模拟器（EmulatorView）
+    ├── Screens/                # 主界面 / 设置页（含触屏布局编辑器 TouchLayoutEditor）/ 播放器（WebView）/ 模拟器（EmulatorView）
     ├── Emulator/               # 核心状态表 + 自绘虚拟手柄 + 键盘捕获 + 输入汇总
     └── Overlay/                # 自绘浮层 + 添加 URL 表单 + 导入 ROM 浮层 + 文件选择器桥接
 Resources/
@@ -218,7 +230,7 @@ build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，�
          沙盒 Documents/Icons/<id>.<ext>（导入的条目图标）
          沙盒 Documents/Covers/<系统>/<ROM>.png（抓取到的 ROM 封面）
          沙盒 Documents/play_history.json（最近游玩）
-         沙盒 Documents/keymap.json（三端键位）
+         沙盒 Documents/keymap.json（三端键位 + 触屏布局：每簇的位置与大小）
 ```
 
 ## 设计约束
