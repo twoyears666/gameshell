@@ -45,8 +45,8 @@
 7. **评分徽章**（半透明底 + 星标 + 分数）—— **已移除，不展示**（`rating` 字段仍能被解析入库，但界面不显示）。
 8. **榜单页**（横幅 + 热门榜 / 最新榜 + 分类 chips + 名次行）—— **已移除，不提供**。
 9. **详情页**（封面 + 标题 + 标签 chips + 介绍 + 底部操作栏）—— **已移除，不提供**。
-10. **底部标签栏**（首页 / 游戏库 / 榜单 / 我的）—— **已移除，不提供**；现在**只有一个主界面**。
-11. **游戏库页 / 分类筛选 / 关键词搜索** —— **已移除，不提供**。
+10. **底部标签栏**（首页 / 游戏库 / 榜单 / 我的）—— **已移除，不提供**；现在**只有一个主界面**（外加一个自绘的设置页覆盖层，不是独立标签页）。
+11. **独立的游戏库页 / 分类筛选 / 关键词搜索** —— **不提供**；「游戏库」现在作为主界面的一个分区存在（与「最近游玩」顶排同页），没有分类筛选与搜索。
 
 ---
 
@@ -55,15 +55,21 @@
 | 功能 | 状态 | 位置 |
 | --- | --- | --- |
 | 深色主题设计令牌集中管理（颜色/圆角/间距/字号/尺寸） | ✅ 已实现 | `Sources/UI/Theme.swift` |
-| **只有一个主界面**（无标签栏 / 无游戏库 / 无榜单 / 无我的 / 无详情 / 无搜索） | ✅ 已实现 | `Sources/UI/Screens/HomeView.swift` |
+| **只有一个主界面**（无标签栏 / 无榜单 / 无我的 / 无详情 / 无搜索），内含「最近游玩」顶排 + 「游戏库」分区 | ✅ 已实现 | `Sources/UI/Screens/HomeView.swift` |
 | **App 内添加 URL**（顶栏「添加」→ 填名称 + URL → 保存，写入沙盒） | ✅ 已实现 | `HomeView.addButton` + `AddGameForm.swift` + `AppState.addGame` |
 | **长按方块卡片删除条目**（自绘确认浮层） | ✅ 已实现 | `SquareTileCard.onLongPress` + `AppState.confirmRemoval` |
 | 用户清单持久化到沙盒 `Documents/games.json`（重启后仍在） | ✅ 已实现 | `GSGameManifest.persistToUserStore` |
 | 游戏清单 JSON 驱动（UI 零硬编码游戏，**默认清单为空、不内置任何游戏**） | ✅ 已实现 | `Resources/games.json` + `GSGameManifest` |
 | URL 驱动启动（WebView 加载 `http(s)`） | ✅ 已实现 | `PlayerView.swift` |
 | 非 `http(s)` 的 URL 交给系统唤起对应 App（如 `steam://`） | ✅ 已实现 | `AppState.openExternally` |
-| 首页第一排 PS5 风格方块行（聚焦放大 / 高亮描边） | ✅ 已实现 | `HomeView.SquareTileRow` + `SquareTileCard` |
+| 首页方块行（聚焦放大 / 高亮描边），现服务于「最近游玩」与「游戏库」两个分区 | ✅ 已实现 | `HomeView.LibraryTileRow` + `SquareTileCard` |
 | 清单为空时的空态引导 | ✅ 已实现 | `HomeView.emptyState` |
+| **顶排「最近游玩」**（最多 10 个，按最后一次游玩时间倒序，条目被删则自动跳过） | ✅ 已实现 | `GSPlayHistory` + `AppState.refreshRecent` |
+| **「游戏库」方块行**（URL 条目 + 模拟器 ROM 混排，一行横向滚动） | ✅ 已实现 | `HomeView.LibraryTileRow` + `LibraryItem.swift` |
+| **URL 条目导入本地图标**（「添加」里选图片，写入沙盒 `Documents/Icons/`） | ✅ 已实现 | `AddGameForm.swift` + `GSIconStore` |
+| **模拟器 ROM 自动抓取官方封面**（libretro-thumbnails `Named_Boxarts`，命中即缓存到 `Documents/Covers/`） | ⚠️ 待实机验证（联网抓取，本机无 iOS SDK，端到端未验证） | `GSCoverFetcher` + `AppState.refreshROMCovers` |
+| **设置页：三端键位**（触屏缩放 / 透明度 / 按键簇显隐、键盘、手柄；改完即生效并持久化） | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
+| 模拟器内三端按键转发（触屏虚拟手柄 + 硬件键盘 + 手柄 → 单一 `GSButton` 位掩码 → 核心） | ✅ 已实现 | `EmulatorInputCoordinator.swift` + `KeyboardCapture.swift` + `GSInputManager` |
 | 深链 `gameshell://home / open / play`（`search` 已移除，收到时提示） | ✅ 已实现 | `GSGameLauncher.m` + `GameshellApp.swift` + `AppState.handle(url:)` |
 | 自绘浮层（toast / confirm / 表单），**不使用系统弹窗** | ✅ 已实现 | `Sources/UI/Overlay/` |
 | 手柄在线探测与热插拔（GameController） | ✅ 已实现 | `GSInputManager.m` |
@@ -78,7 +84,7 @@
 | **模拟器：画面输出**（核心出 RGBA8888 → CGImage，`CADisplayLink` 按屏幕刷新率取最新帧） | ✅ 已实现（iOS） | `GSEmulator.m` + `EmulatorView.EmulatorFrameSource` |
 | **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
 | **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` |
-| **模拟器：主界面 ROM 分区**（按系统分组 + 核心接入状态表） | ✅ 已实现（iOS） | `Sources/UI/Emulator/RomLibrarySection.swift` |
+| **模拟器：ROM 并入游戏库**（统一方块行，卡片带系统徽标 / 封面）+ 设置页「核心接入状态表」 | ✅ 已实现（iOS） | `Sources/UI/Components/LibraryItem.swift` + `Sources/UI/Components/GameCard.swift` + `Sources/UI/Emulator/CoreStatusList.swift` |
 | **模拟器：JIT 能力探测**（真的去 `mmap(MAP_JIT)` 试探）+ TrollStore 探测 | ✅ 已实现 | `GSJIT`（`Sources/Core/GSEmulator.m`） |
 | **模拟器：核心编译期降级**（某个核心没编出来 → 该项目如实标成「不可用」，不拖垮整个构建） | ✅ 已实现 | `Scripts/build_cores.sh` + `Sources/Core/GSBuiltCoresCompat.h` |
 
@@ -102,7 +108,7 @@
 | 云游戏串流 | **未完成** |
 | 游戏下载与本地安装 | **未完成** |
 | 本地模拟器内核（如 JVM / 兼容层） | **未完成** |
-| 手柄按键映射到网页内游戏（当前只做在线探测，未做按键转发/映射） | **未完成** |
+| 手柄 / 键盘按键**转发进网页内游戏**（当前只做在线探测；转发只实现了「进模拟器核心」，网页游戏仍不转发） | **未完成** |
 | 蓝牙键鼠按键转发进网页游戏 | **未完成** |
 | 主界面方块行的手柄 / 键盘焦点导航（当前只有指针悬停聚焦，手柄不能左右移动焦点，也不能用手柄选中启动） | **未完成** |
 | **App 内编辑已有条目**（现在只能添加和删除，不能改名称 / URL） | **未完成** |
@@ -155,7 +161,7 @@
 ## 4. 为什么是「壳」
 
 本项目当前定位为**界面壳 + 启动通路**：
-- 只有一个主界面，把「游戏」抽象成一条 URL：接入新游戏**不需要改代码**，在 App 内点「添加」填一条 URL 即可（或直接改沙盒 `games.json`）；
+- 只有主界面（+ 一个自绘设置页覆盖层），把「游戏」抽象成一条 URL：接入新游戏**不需要改代码**，在 App 内点「添加」填一条 URL 即可（或直接改沙盒 `games.json`）；
   这条 URL 既可以是网页（`http(s)` → 内置 WebView），也可以是 `steam://` 这类**唤起本机 App** 的链接（交给系统打开）；
 - 把视觉全部收敛到 `Theme.swift`，因此后续换皮 / 做主题包**不需要改视图逻辑**；
 - 核心逻辑（清单、启动、输入）放在 Objective-C，方便后续接入更底层的原生能力。

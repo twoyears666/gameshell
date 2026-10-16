@@ -1,0 +1,519 @@
+//
+//  SettingsView.swift
+//  Gameshell
+//
+//  设置页：三端键位（触屏 / 键盘 / 手柄）+ 核心接入进度一览。
+//  自绘覆盖层（与播放器同级），不使用任何系统弹窗。
+//  三端键位改完立即写回 GSKeyMapping 并持久化到 Documents/keymap.json。
+//
+
+import SwiftUI
+import Foundation
+
+struct SettingsView: View {
+    @EnvironmentObject private var state: AppState
+
+    @State private var resetToken = 0
+
+    #if os(iOS)
+    @StateObject private var capture = GSBindingCapture()
+    #endif
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SettingsHeaderBar(subtitle: headerSubtitle) { state.closeSettings() }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    #if os(iOS)
+                    TouchSettingsCard(mapping: state.keyMapping)
+                    KeyboardSettingsCard(mapping: state.keyMapping, capture: capture)
+                    GamepadSettingsCard(mapping: state.keyMapping, capture: capture)
+                    CoreIntegrationCard()
+                    resetCard
+                    #else
+                    macNotice
+                    #endif
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.vertical, Theme.Spacing.md)
+                .id(resetToken)
+            }
+        }
+        .background(Theme.Color.background)
+        .overlay { captureLayer }
+        .transition(.opacity)
+    }
+
+    private var headerSubtitle: String {
+        #if os(iOS)
+        return "触屏 / 键盘 / 手柄三端键位"
+        #else
+        return "macOS 版为纯 URL 模式"
+        #endif
+    }
+
+    // MARK: - 绑定捕获层
+
+    @ViewBuilder
+    private var captureLayer: some View {
+        #if os(iOS)
+        ZStack(alignment: .bottom) {
+            if capture.isBinding {
+                bindingBanner
+            }
+            // 常驻的 0 尺寸键盘捕获视图：只在需要绑键时才成为 first responder
+            KeyboardCaptureView(isActive: capture.awaitingKeyboard) { usage, pressed in
+                capture.handleKeyboard(usage, pressed: pressed)
+            }
+            .frame(width: 0, height: 0)
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    /// 全部恢复默认（触屏布局 + 键盘 / 手柄键位）
+    private var resetCard: some View {
+        SettingsCard(title: "恢复默认",
+                     subtitle: "把触屏布局与键盘 / 手柄键位全部还原成内置默认值") {
+            HStack {
+                Spacer(minLength: 0)
+                PillButton(title: "全部恢复默认", style: .secondary) {
+                    state.keyMapping.resetToDefaults()
+                    resetToken += 1
+                }
+                .frame(width: 150)
+            }
+        }
+    }
+
+    private var bindingBanner: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Image(systemName: capture.mode == .keyboard ? "keyboard" : "gamecontroller")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.Color.accent)
+
+            Text(bindingPrompt)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.textPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            PillButton(title: "取消", style: .secondary) { capture.cancel() }
+                .frame(width: 72)
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.xs)
+        .background(Theme.Color.surface.opacity(0.96))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.Color.border).frame(height: 1)
+        }
+    }
+
+    private var bindingPrompt: String {
+        let name = capture.pending.map { GSKeyMapping.displayName(for: $0) } ?? "该键"
+        return capture.mode == .keyboard
+            ? "为「\(name)」绑定键盘键：按下任意键（Esc 取消）"
+            : "为「\(name)」绑定手柄键：按手柄上的任意键（点「取消」放弃）"
+    }
+    #else
+    private var macNotice: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "laptopcomputer")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.Color.accent)
+                Text("macOS 版没有模拟器")
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textPrimary)
+            }
+            Text("模拟器核心（mGBA / Nestopia / Mesen-S）只在 iOS 目标里交叉编译，macOS 版保持纯 URL 模式，因此没有键位需要配置。")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Theme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .fill(Theme.Color.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .stroke(Theme.Color.border, lineWidth: 1)
+                )
+        )
+    }
+    #endif
+}
+
+// MARK: - 顶栏
+
+/// 设置页顶栏：返回 + 标题 + 副标题（iOS / macOS 共用）
+private struct SettingsHeaderBar: View {
+    let subtitle: String
+    let onBack: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Button(action: onBack) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("返回")
+                        .font(Theme.Font.caption)
+                }
+                .foregroundStyle(Theme.Color.textPrimary)
+                .padding(.horizontal, Theme.Spacing.sm)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                        .fill(Theme.Color.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                                .stroke(Theme.Color.border, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("设置")
+                    .font(Theme.Font.cardTitle)
+                    .foregroundStyle(Theme.Color.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.Color.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.xs)
+        .background(Theme.Color.headerGradient)
+    }
+}
+
+#if os(iOS)
+
+// MARK: - 绑键捕获
+
+/// 设置页的「等待按下某个键」状态机。
+/// 键盘：KeyboardCaptureView 把物理按键给过来；手柄：GSInputManager 转发按钮标识。
+/// Esc（HID 41）在键盘模式下等于取消。
+final class GSBindingCapture: ObservableObject {
+
+    enum Mode { case keyboard, gamepad }
+
+    /// 是否正在等一个键盘按键（KeyboardCaptureView 据此决定是否成为 first responder）
+    @Published var awaitingKeyboard = false
+    /// 等待绑定的按钮；nil = 没在绑
+    @Published private(set) var pending: GSButton?
+    /// 每次绑定 / 清除后自增，设置页据此刷新显示的键名
+    @Published private(set) var revision = 0
+
+    private(set) var mode: Mode = .keyboard
+    private var forwardingGamepad = false
+
+    private let mapping = GSKeyMapping.shared()
+    private var escapeUsage: Int { Int(UIKeyboardHIDUsage.keyboardEscape.rawValue) }
+
+    var isBinding: Bool { pending != nil }
+
+    func startKeyboardBind(_ button: GSButton) {
+        stopGamepadForwarding()
+        mode = .keyboard
+        pending = button
+        awaitingKeyboard = true
+        revision += 1
+    }
+
+    func startGamepadBind(_ button: GSButton) {
+        mode = .gamepad
+        pending = button
+        awaitingKeyboard = false
+
+        guard !forwardingGamepad else { return }
+        forwardingGamepad = true
+        GSInputManager.shared().beginButtonForwarding { [weak self] identifier, pressed in
+            guard pressed else { return }
+            DispatchQueue.main.async { self?.bindGamepad(identifier) }
+        }
+        revision += 1
+    }
+
+    func handleKeyboard(_ usage: UIKeyboardHIDUsage, pressed: Bool) {
+        guard awaitingKeyboard, pressed, let pending else { return }
+        if Int(usage.rawValue) == escapeUsage {
+            cancel()
+            return
+        }
+        mapping.setKeyboardUsage(Int(usage.rawValue), for: pending)
+        mapping.persist()
+        self.awaitingKeyboard = false
+        self.pending = nil
+        revision += 1
+    }
+
+    func bindGamepad(_ identifier: String) {
+        guard mode == .gamepad, let pending else { return }
+        mapping.setGamepadIdentifier(identifier, for: pending)
+        mapping.persist()
+        self.pending = nil
+        stopGamepadForwarding()
+        revision += 1
+    }
+
+    func clearKeyboard(_ button: GSButton) {
+        mapping.clearKeyboardBinding(for: button)
+        mapping.persist()
+        revision += 1
+    }
+
+    func clearGamepad(_ button: GSButton) {
+        mapping.clearGamepadBinding(for: button)
+        mapping.persist()
+        revision += 1
+    }
+
+    func cancel() {
+        pending = nil
+        awaitingKeyboard = false
+        stopGamepadForwarding()
+        revision += 1
+    }
+
+    func refresh() { revision += 1 }
+
+    private func stopGamepadForwarding() {
+        if forwardingGamepad {
+            GSInputManager.shared().endButtonForwarding()
+            forwardingGamepad = false
+        }
+    }
+}
+
+// MARK: - 卡片外壳
+
+private struct SettingsCard<Content: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Theme.Font.cardTitle)
+                    .foregroundStyle(Theme.Color.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textSecondary)
+                }
+            }
+            content()
+        }
+        .padding(Theme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GSCardBackground())
+    }
+}
+
+// MARK: - 触屏
+
+private struct TouchSettingsCard: View {
+    let mapping: GSKeyMapping
+
+    @State private var scale: CGFloat
+    @State private var opacity: CGFloat
+    @State private var showDPad: Bool
+    @State private var showFace: Bool
+    @State private var showShoulders: Bool
+    @State private var showStartSelect: Bool
+
+    init(mapping: GSKeyMapping) {
+        self.mapping = mapping
+        _scale = State(initialValue: mapping.touchScale)
+        _opacity = State(initialValue: mapping.touchOpacity)
+        _showDPad = State(initialValue: mapping.touchShowDPad)
+        _showFace = State(initialValue: mapping.touchShowFace)
+        _showShoulders = State(initialValue: mapping.touchShowShoulders)
+        _showStartSelect = State(initialValue: mapping.touchShowStartSelect)
+    }
+
+    var body: some View {
+        SettingsCard(title: "触屏手柄", subtitle: "缩放、透明度与各按键簇是否显示") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                slider(title: "缩放",
+                       value: $scale,
+                       range: 0.6...1.4,
+                       readout: String(format: "%.2f×", scale)) { value in
+                    mapping.touchScale = value
+                }
+
+                slider(title: "透明度",
+                       value: $opacity,
+                       range: 0.3...1.0,
+                       readout: String(format: "%.0f%%", opacity * 100)) { value in
+                    mapping.touchOpacity = value
+                }
+
+                toggle(title: "显示十字键", isOn: $showDPad) { mapping.touchShowDPad = $0 }
+                toggle(title: "显示 A / B", isOn: $showFace) { mapping.touchShowFace = $0 }
+                toggle(title: "显示 L / R", isOn: $showShoulders) { mapping.touchShowShoulders = $0 }
+                toggle(title: "显示 START / SELECT", isOn: $showStartSelect) { mapping.touchShowStartSelect = $0 }
+            }
+        }
+    }
+
+    private func slider(title: String,
+                        value: Binding<CGFloat>,
+                        range: ClosedRange<CGFloat>,
+                        readout: String,
+                        apply: @escaping (CGFloat) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                    .font(Theme.Font.chip)
+                    .foregroundStyle(Theme.Color.textSecondary)
+                Spacer(minLength: 0)
+                Text(readout)
+                    .font(Theme.Font.chip)
+                    .foregroundStyle(Theme.Color.textPrimary)
+            }
+            Slider(value: value, in: range)
+                .tint(Theme.Color.accent)
+                .onChange(of: value.wrappedValue) { newValue in
+                    apply(newValue)
+                    mapping.persist()
+                }
+        }
+    }
+
+    private func toggle(title: String,
+                        isOn: Binding<Bool>,
+                        apply: @escaping (Bool) -> Void) -> some View {
+        Toggle(isOn: isOn) {
+            Text(title)
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.Color.textPrimary)
+        }
+        .tint(Theme.Color.accent)
+        .onChange(of: isOn.wrappedValue) { newValue in
+            apply(newValue)
+            mapping.persist()
+        }
+    }
+}
+
+// MARK: - 键盘 / 手柄 共用行
+
+private struct BindingRow: View {
+    let raw: UInt32
+    let label: String?
+    let isCapturing: Bool
+    let onBind: () -> Void
+    let onClear: () -> Void
+    let onCancel: () -> Void
+
+    private var title: String {
+        GSKeyMapping.displayName(for: GSButton(rawValue: raw))
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Text(title)
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.Color.textPrimary)
+                .frame(width: 92, alignment: .leading)
+
+            if isCapturing {
+                Text("等待按键…")
+                    .font(Theme.Font.chip)
+                    .foregroundStyle(Theme.Color.accent)
+                Spacer(minLength: 0)
+                PillButton(title: "取消", style: .secondary, action: onCancel)
+                    .frame(width: 72)
+            } else {
+                Text(label ?? "未绑定")
+                    .font(Theme.Font.chip)
+                    .foregroundStyle(label == nil ? Theme.Color.textTertiary : Theme.Color.textSecondary)
+                Spacer(minLength: 0)
+                PillButton(title: label == nil ? "绑定" : "重绑", style: .secondary, action: onBind)
+                    .frame(width: 72)
+                if label != nil {
+                    PillButton(title: "清除", style: .secondary, action: onClear)
+                        .frame(width: 72)
+                }
+            }
+        }
+        .padding(.vertical, 1)
+    }
+}
+
+private struct KeyboardSettingsCard: View {
+    let mapping: GSKeyMapping
+    @ObservedObject var capture: GSBindingCapture
+
+    private var buttons: [UInt32] {
+        GSKeyMapping.configurableButtons().map { $0.uint32Value }
+    }
+
+    var body: some View {
+        SettingsCard(title: "键盘", subtitle: "点「绑定」后按下键盘上的键即可，Esc 取消") {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(buttons, id: \.self) { raw in
+                    BindingRow(raw: raw,
+                               label: mapping.keyboardBindingLabel(for: GSButton(rawValue: raw)),
+                               isCapturing: capture.isBinding
+                                   && capture.mode == .keyboard
+                                   && capture.pending == GSButton(rawValue: raw),
+                               onBind: { capture.startKeyboardBind(GSButton(rawValue: raw)) },
+                               onClear: { capture.clearKeyboard(GSButton(rawValue: raw)) },
+                               onCancel: { capture.cancel() })
+                }
+            }
+        }
+    }
+}
+
+private struct GamepadSettingsCard: View {
+    let mapping: GSKeyMapping
+    @ObservedObject var capture: GSBindingCapture
+
+    private var buttons: [UInt32] {
+        GSKeyMapping.configurableButtons().map { $0.uint32Value }
+    }
+
+    var body: some View {
+        SettingsCard(title: "手柄", subtitle: "点「绑定」后按手柄上的键即可（需要先连上手柄）") {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(buttons, id: \.self) { raw in
+                    BindingRow(raw: raw,
+                               label: mapping.gamepadBindingLabel(for: GSButton(rawValue: raw)),
+                               isCapturing: capture.isBinding
+                                   && capture.mode == .gamepad
+                                   && capture.pending == GSButton(rawValue: raw),
+                               onBind: { capture.startGamepadBind(GSButton(rawValue: raw)) },
+                               onClear: { capture.clearGamepad(GSButton(rawValue: raw)) },
+                               onCancel: { capture.cancel() })
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 核心接入进度
+
+private struct CoreIntegrationCard: View {
+    var body: some View {
+        SettingsCard(title: "核心接入进度", subtitle: "未接入的系统如实标注，不假装能玩") {
+            CoreStatusList()
+        }
+    }
+}
+
+#endif

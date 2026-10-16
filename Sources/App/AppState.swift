@@ -8,15 +8,14 @@ import UIKit
 import AppKit
 #endif
 
-/// 全局应用状态：清单、启动、自绘浮层。
-/// 本 App 只有主界面；禁用系统弹窗（UIAlertController / NSAlert），
-/// 所有提示与确认都走 CustomOverlay。
+/// 全局应用状态：清单、游戏库（URL 条目 + 模拟器 ROM）、最近游玩、启动、自绘浮层。
+/// 本 App 禁用系统弹窗（UIAlertController / NSAlert），所有提示与确认都走 CustomOverlay。
 final class AppState: ObservableObject {
 
     /// 清单本身（标题 / 副标题 / 条目）
     @Published private(set) var manifest: GSGameManifest?
 
-    /// 主界面方块行的数据源：全是用户自己添加的条目，App 不内置任何游戏
+    /// 游戏库里用户自己添加的 URL 条目，App 不内置任何游戏
     @Published private(set) var games: [GSGame] = []
 
     /// 正在打开的游戏（http(s) 走内置 WebView）
@@ -34,12 +33,30 @@ final class AppState: ObservableObject {
     /// 会话启动失败的原因（例如缺少 JIT）；nil = 已经正常启动
     @Published private(set) var emulatorStartFailure: String?
 
+    /// 顶排「最近游玩」：按时间倒序，UI 只取前 10 个
+    @Published private(set) var recentItems: [LibraryItem] = []
+
+    /// ROM 封面缓存：rom.identifier → 相对 Documents 的路径。
+    /// 抓取完成后更新这里，卡片会随之换成真封面（之前显示系统徽标）。
+    @Published private(set) var romCovers: [String: String] = [:]
+
     @Published var overlay: OverlayRequest?
+
+    /// 设置页是否打开（自绘覆盖层，与播放器同级）
+    @Published var settingsOpen = false
 
     /// 外设状态摘要（手柄 / 键鼠）
     @Published private(set) var inputSummary: String = "未检测到外设"
 
+    /// 三端键位配置（触屏 / 键盘 / 手柄）：设置页改的就是这一份，模拟器读的也是它
+    let keyMapping = GSKeyMapping.shared()
+
     private var inputObserver: NSObjectProtocol?
+
+    // GSPlayHistoryKind 的原始值（见 GSPlayHistory.h）：URL 条目 = 0，ROM = 1。
+    // 这里用原始值比较，避免依赖 Swift 对枚举成员名的自动改写。
+    private static let historyKindURL = 0
+    private static let historyKindROM = 1
 
     #if os(iOS)
     /// 模拟器声音（核心 → AVAudioEngine）
@@ -49,11 +66,23 @@ final class AppState: ObservableObject {
     init() {
         loadManifest()
         refreshROMs()
+        refreshRecent()
         observeInput()
     }
 
     var title: String { manifest?.title ?? "Gameshell" }
     var subtitle: String { manifest?.subtitle ?? "" }
+
+    /// 游戏库内容：用户添加的 URL 条目 + 导入的 ROM，混排在一起
+    var libraryItems: [LibraryItem] {
+        games.map { .game($0) } + roms.map { .rom($0) }
+    }
+
+    /// 重新扫 ROM 库 + 刷新最近游玩（进主界面时调一次）
+    func refreshLibrary() {
+        refreshROMs()
+        refreshRecent()
+    }
 
     // MARK: - 清单
 
@@ -66,8 +95,12 @@ final class AppState: ObservableObject {
     }
 
     /// App 内添加 URL —— 基础功能。
+    /// iconData 非空时会先把图片写进沙盒（Documents/Icons/<id>.<ext>），条目里只记相对路径。
     /// 校验不通过时用自绘 toast 提示并返回 false。
-    func addGame(name: String, urlString: String) -> Bool {
+    func addGame(name: String,
+                 urlString: String,
+                 iconData: Data? = nil,
+                 iconExtension: String? = nil) -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -88,14 +121,24 @@ final class AppState: ObservableObject {
             return false
         }
 
+        let identifier = UUID().uuidString
+        var icon = ""
+        if let iconData {
+            icon = GSIconStore.storeIconData(iconData,
+                                            fileExtension: iconExtension,
+                                            forIdentifier: identifier) ?? ""
+        }
+
         let game = GSGame(dictionary: [
-            "id": UUID().uuidString,
+            "id": identifier,
             "name": trimmedName,
             "url": url.absoluteString,
             "platform": platformLabel(for: url),
+            "icon": icon,
         ])
         manifest.add(game)
         games = manifest.games
+        refreshRecent()
 
         if !manifest.persistToUserStore() {
             showToast("已添加，但写入沙盒失败（重启后会丢）")
@@ -116,6 +159,12 @@ final class AppState: ObservableObject {
         guard let manifest else { return }
         manifest.removeGame(withIdentifier: game.identifier)
         games = manifest.games
+
+        // 本地图标与最近游玩记录跟着一起清掉
+        _ = GSIconStore.removeIcon(forIdentifier: game.identifier)
+        GSLocalImageStore.invalidate()
+        GSPlayHistory.shared().removeIdentifier(game.identifier)
+        refreshRecent()
 
         if !manifest.persistToUserStore() {
             showToast("删除后写入沙盒失败")
@@ -144,12 +193,29 @@ final class AppState: ObservableObject {
 
     // MARK: - 启动
 
+    /// 游戏库里的任意一条：URL 条目走 URL 启动，ROM 走模拟器
+    func launch(_ item: LibraryItem) {
+        switch item {
+        case .game(let game): launch(game)
+        case .rom(let rom): launchROM(rom)
+        }
+    }
+
+    func confirmRemoval(of item: LibraryItem) {
+        switch item {
+        case .game(let game): confirmRemoval(of: game)
+        case .rom(let rom): confirmROMRemoval(of: rom)
+        }
+    }
+
     /// URL 驱动启动：http(s) 交给内置 WebView，其它 scheme 交给系统唤起对应 App。
     func launch(_ game: GSGame) {
         guard let url = GSGameLauncher.normalizedGameURL(from: game.gameURLString, baseURL: nil) else {
             showToast("这条记录没有可用的 URL")
             return
         }
+        recordPlay(identifier: game.identifier, isROM: false)
+
         if url.scheme == "http" || url.scheme == "https" {
             playingGame = game
         } else {
@@ -177,11 +243,62 @@ final class AppState: ObservableObject {
         playingGame = nil
     }
 
+    // MARK: - 最近游玩
+
+    /// 记一次游玩并立刻刷新顶排（找不到对应条目时 UI 侧直接跳过）
+    private func recordPlay(identifier: String, isROM: Bool) {
+        let raw = isROM ? Self.historyKindROM : Self.historyKindURL
+        guard let kind = GSPlayHistoryKind(rawValue: raw) else { return }
+        GSPlayHistory.shared().recordIdentifier(identifier, kind: kind)
+        refreshRecent()
+    }
+
+    /// 重建顶排：把历史记录映射回当前还在库里的条目，按时间倒序
+    func refreshRecent() {
+        var pool: [String: LibraryItem] = [:]
+        for game in games { pool["game:" + game.identifier] = .game(game) }
+        for rom in roms { pool["rom:" + rom.identifier] = .rom(rom) }
+
+        let entries = GSPlayHistory.shared().recentEntries(withLimit: GSPlayHistory.historyLimit())
+        recentItems = entries.compactMap { entry in
+            let prefix = entry.kind.rawValue == Self.historyKindROM ? "rom:" : "game:"
+            return pool[prefix + entry.identifier]
+        }
+    }
+
     // MARK: - 模拟器 ROM
 
-    /// 重新扫描沙盒里的 Documents/ROMs
+    /// 重新扫描沙盒里的 Documents/ROMs（macOS 版是纯 URL 模式，不扫）
     func refreshROMs() {
+        #if os(iOS)
         roms = GSROMLibrary.allROMs()
+        refreshROMCovers()
+        #endif
+    }
+
+    /// 重建 ROM 封面表 + 抓取还没封面的那些
+    private func refreshROMCovers() {
+        var map: [String: String] = [:]
+        for rom in roms {
+            if let path = GSCoverFetcher.cachedCoverRelativePath(forROM: rom) {
+                map[rom.identifier] = path
+            }
+        }
+        romCovers = map
+        fetchMissingCovers()
+    }
+
+    /// 缺封面的 ROM 交给 GSCoverFetcher 去 libretro-thumbnails 找；命中一个更新一个
+    private func fetchMissingCovers() {
+        let missing = roms.filter { romCovers[$0.identifier] == nil }
+        guard !missing.isEmpty else { return }
+
+        GSCoverFetcher.shared().fetchCovers(roms: missing,
+                                          limit: 40,
+                                          progress: { [weak self] identifier, path in
+            DispatchQueue.main.async { self?.romCovers[identifier] = path }
+        },
+                                          completion: nil)
     }
 
     /// 导入一份 ROM（文件选择器给的 URL）→ 复制进沙盒里对应的系统目录
@@ -215,7 +332,9 @@ final class AppState: ObservableObject {
     private func remove(_ rom: GSROM) {
         do {
             try GSROMLibrary.delete(rom)
+            GSPlayHistory.shared().removeIdentifier(rom.identifier)
             refreshROMs()
+            refreshRecent()
             showToast("已删除「\(rom.name)」")
         } catch {
             showToast("删除失败：\(error.localizedDescription)")
@@ -229,6 +348,8 @@ final class AppState: ObservableObject {
             showToast("\(info.shortName)：\(info.statusNote ?? "尚无可用核心")")
             return
         }
+
+        recordPlay(identifier: rom.identifier, isROM: true)
 
         stopPlaying()
         stopPlayingROM()
@@ -267,6 +388,16 @@ final class AppState: ObservableObject {
         emulatorSession = nil
         playingROM = nil
         emulatorStartFailure = nil
+    }
+
+    // MARK: - 设置页
+
+    func openSettings() {
+        withAnimation(Theme.Motion.spring) { settingsOpen = true }
+    }
+
+    func closeSettings() {
+        withAnimation(Theme.Motion.standard) { settingsOpen = false }
     }
 
     // MARK: - 深链

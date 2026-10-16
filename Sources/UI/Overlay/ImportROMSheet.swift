@@ -5,7 +5,7 @@
 //  「导入 ROM」自绘浮层。
 //
 //  说明 + 系统支持表 + 一个「选择 ROM 文件」的动作按钮。
-//  选文件用的是系统文件选择器（UIDocumentPickerViewController）—— iOS 上唯一
+//  选文件走共享的 DocumentPickerBridge（系统文件选择器）——iOS 上唯一
 //  能浏览文件的方式；它不是弹窗，本 App 的提示 / 确认仍然全部走自绘浮层。
 //
 
@@ -13,7 +13,6 @@ import SwiftUI
 
 #if os(iOS)
 
-import UIKit
 import UniformTypeIdentifiers
 
 struct ImportROMSheet: View {
@@ -30,7 +29,6 @@ struct ImportROMSheet: View {
                 .onTapGesture { onClose() }
 
             card
-                .background(picker)
         }
         .transition(.opacity)
     }
@@ -64,66 +62,16 @@ struct ImportROMSheet: View {
         .background(GSCardBackground())
         .shadow(color: .black.opacity(0.5), radius: 24, y: 12)
         .padding(Theme.Spacing.lg)
+        .background(picker)
     }
 
-    /// 挂一个 0 尺寸的桥接视图，用来把系统文件选择器呈现出来
+    /// 0 尺寸桥接视图：把系统文件选择器呈现出来
     private var picker: some View {
-        DocumentPickerBridge(isPresented: $isPickerPresented) { url in
+        DocumentPickerBridge(isPresented: $isPickerPresented, contentTypes: [.data]) { url in
             state.importROM(from: url)
             onClose()
         }
         .frame(width: 0, height: 0)
-    }
-}
-
-// MARK: - 系统文件选择器桥接
-
-/// 用一个 0 尺寸的宿主 VC 呈现 UIDocumentPickerViewController，
-/// 避免 SwiftUI 的 .sheet（本 App 不用任何系统弹层）。
-private struct DocumentPickerBridge: UIViewControllerRepresentable {
-
-    @Binding var isPresented: Bool
-    var onPick: (URL) -> Void
-
-    func makeUIViewController(context: Context) -> UIViewController {
-        UIViewController()
-    }
-
-    func updateUIViewController(_ viewController: UIViewController, context: Context) {
-        context.coordinator.onPick = onPick
-        context.coordinator.onFinish = { isPresented = false }
-
-        if isPresented {
-            guard viewController.presentedViewController == nil else { return }
-            // 不限定 UTType：ROM 的扩展名（.gba/.nes…）没有系统类型，交给 App 自己按扩展名识别
-            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
-            picker.allowsMultipleSelection = false
-            picker.delegate = context.coordinator
-            viewController.present(picker, animated: true)
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        var onPick: (URL) -> Void
-        var onFinish: (() -> Void)?
-
-        init(onPick: @escaping (URL) -> Void) {
-            self.onPick = onPick
-        }
-
-        func documentPicker(_ controller: UIDocumentPickerViewController,
-                            didPickDocumentsAt urls: [URL]) {
-            if let url = urls.first {
-                onPick(url)
-            }
-            onFinish?()
-        }
-
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            onFinish?()
-        }
     }
 }
 

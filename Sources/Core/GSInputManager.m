@@ -42,9 +42,18 @@ NSNotificationName const GSInputManagerDidUpdateNotification = @"GSInputManagerD
 @property (nonatomic, copy, readwrite) GSInputSnapshot *snapshot;
 @property (nonatomic, assign) BOOL monitoring;
 
+/// 手柄按键转发：forwarding 为 YES 且 handler 非空时，每个按钮事件都会回调
+@property (nonatomic, copy, nullable) GSInputButtonHandler buttonHandler;
+@property (nonatomic, assign) BOOL forwarding;
+
 - (void)refreshSnapshot;
 - (void)notifyDelegate;
 - (void)handleControllerListChanged;
+
+- (void)attachForwardingToController:(GCController *)controller;
+- (void)attachDirectionButtons:(GCControllerDirectionPad *)dpad key:(NSString *)key;
+- (void)detachForwardingFromController:(GCController *)controller;
+- (void)forwardIdentifier:(NSString *)identifier pressed:(BOOL)pressed;
 @end
 
 @implementation GSInputManager
@@ -106,6 +115,12 @@ NSNotificationName const GSInputManagerDidUpdateNotification = @"GSInputManagerD
 
 - (void)handleControllerListChanged {
     [self refreshSnapshot];
+    if (self.forwarding) {
+        // 热插拔：新上线的手柄也要立刻挂上转发
+        for (GCController *controller in [GCController controllers]) {
+            [self attachForwardingToController: controller];
+        }
+    }
     [self notifyDelegate];
 }
 
@@ -166,6 +181,89 @@ NSNotificationName const GSInputManagerDidUpdateNotification = @"GSInputManagerD
         work();
     } else {
         dispatch_async(dispatch_get_main_queue(), work);
+    }
+}
+
+#pragma mark - 手柄按键转发
+
+- (void)beginButtonForwardingWithHandler:(GSInputButtonHandler)handler {
+    self.buttonHandler = handler;
+    self.forwarding = YES;
+    for (GCController *controller in [GCController controllers]) {
+        [self attachForwardingToController: controller];
+    }
+}
+
+- (void)endButtonForwarding {
+    self.forwarding = NO;
+    for (GCController *controller in [GCController controllers]) {
+        [self detachForwardingFromController: controller];
+    }
+    self.buttonHandler = nil;
+}
+
+- (void)attachForwardingToController:(GCController *)controller {
+    if (!self.forwarding) {
+        return;
+    }
+    GCPhysicalInputProfile *profile = controller.physicalInputProfile;
+    if (profile == nil) {
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+
+    // 普通按钮："Button A" / "Button B" / "Left Shoulder" / "Menu" …
+    for (NSString *identifier in profile.buttons) {
+        GCControllerButtonInput *button = profile.buttons[identifier];
+        button.pressedChangedHandler = ^(GCControllerButtonInput *element, float value, BOOL pressed) {
+            [weakSelf forwardIdentifier: identifier pressed: pressed];
+        };
+    }
+
+    // 十字键 / 方向键："Direction Pad Up" / "Direction Pad Down" …
+    for (NSString *identifier in profile.dpads) {
+        [self attachDirectionButtons: profile.dpads[identifier] key: identifier];
+    }
+}
+
+- (void)attachDirectionButtons:(GCControllerDirectionPad *)dpad key:(NSString *)key {
+    __weak typeof(self) weakSelf = self;
+    void (^attach)(GCControllerButtonInput *, NSString *) = ^(GCControllerButtonInput *button, NSString *identifier) {
+        if (button == nil) {
+            return;
+        }
+        button.pressedChangedHandler = ^(GCControllerButtonInput *element, float value, BOOL pressed) {
+            [weakSelf forwardIdentifier: identifier pressed: pressed];
+        };
+    };
+    attach(dpad.up, [key stringByAppendingString: @" Up"]);
+    attach(dpad.down, [key stringByAppendingString: @" Down"]);
+    attach(dpad.left, [key stringByAppendingString: @" Left"]);
+    attach(dpad.right, [key stringByAppendingString: @" Right"]);
+}
+
+- (void)forwardIdentifier:(NSString *)identifier pressed:(BOOL)pressed {
+    GSInputButtonHandler handler = self.buttonHandler;
+    if (handler != nil) {
+        handler(identifier, pressed);
+    }
+}
+
+- (void)detachForwardingFromController:(GCController *)controller {
+    GCPhysicalInputProfile *profile = controller.physicalInputProfile;
+    if (profile == nil) {
+        return;
+    }
+    for (NSString *identifier in profile.buttons) {
+        profile.buttons[identifier].pressedChangedHandler = nil;
+    }
+    for (NSString *identifier in profile.dpads) {
+        GCControllerDirectionPad *dpad = profile.dpads[identifier];
+        dpad.up.pressedChangedHandler = nil;
+        dpad.down.pressedChangedHandler = nil;
+        dpad.left.pressedChangedHandler = nil;
+        dpad.right.pressedChangedHandler = nil;
     }
 }
 

@@ -5,18 +5,20 @@
 本仓库以「壳 + 启动通路」为主；模拟器部分**已接入 mGBA、Nestopia 与 Mesen-S**（GBA / GB / GBC / NES / SNES），其余系统**尚未接入**。
 功能会持续往里加，**没实现的功能都在 [REFERENCE.md](REFERENCE.md) 里如实标注为「未完成」**。
 
-- **只有一个界面**：主界面（顶栏 + 第一排方块行），没有游戏库 / 榜单 / 我的等其它页面
+- **主界面**：顶栏 + 顶排「最近游玩」（最多 10 个）+ 「游戏库」方块行（URL 条目与模拟器 ROM 混排）；另有**设置页**（触屏 / 键盘 / 手柄三端键位）
 - **技术栈**：Swift（SwiftUI，UI 层）+ Objective-C（核心层）混合
 - **游戏来源**：完全 **URL 驱动** —— 打开一个 URL 就等于打开一个游戏或 App；
   `http(s)` 用内置 WebView 打开，`steam://` 这类 scheme 交给系统**唤起对应 App**
 - **App 内添加 URL**：主界面右上角「添加」，填名称 + URL 即可，写入沙盒后重启仍在（基础功能）
 - **不内置任何游戏**：清单默认为空，所有条目都由你自己添加
-- **模拟器 ROM 导入与模拟**：主界面「模拟器 ROM」分区，导入 ROM 后点开卡片即用内置核心模拟；
+- **模拟器 ROM 导入与模拟**：游戏库右上角「导入 ROM」，导入后点开卡片即用内置核心模拟；
   **不内置任何 ROM**，全部由你自己导入（App 内导入，或从「文件」App 拷进 `Documents/ROMs/<系统>/`）
 - **已接入的核心**：**mGBA**（GBA / GB / GBC）+ **Nestopia**（NES）+ **Mesen-S**（SNES）；NDS / 3DS / Wii / Wii U **尚未接入**（如实标注，见 [REFERENCE.md](REFERENCE.md)）
+- **游戏封面**：URL 条目可在「添加」时**导入本地图标**；模拟器 ROM 会**自动联网抓取官方封面**（libretro-thumbnails 的 `Named_Boxarts`），命中即缓存，未命中回退到系统徽标，不报错
+- **键位设置**：右上角齿轮进设置页，可分别调整**触屏**（缩放 / 透明度 / 各按键簇显隐）、**键盘**、**手柄**三端键位，改完即生效并持久化
 - **虚拟手柄**：操控界面自绘（布局参照 Delta / manic emu），**不借鉴 RetroArch 的触屏 UI**
 - **第一排**：PS5 风格的横向方块行（聚焦项放大 + 白色高亮描边，其余缩小变暗）
-- **输入**：支持 **手柄**（GameController 框架，热插拔）与 **键鼠**
+- **输入**：**手柄**（GameController 框架，热插拔）与 **键鼠**都能被识别；模拟器内触屏 / 键盘 / 手柄三端按键会汇总成一份位掩码转发给核心
 - **构建**：GitHub Actions CI（macOS runner：XcodeGen + xcodebuild）
 - **主题**：所有颜色 / 圆角 / 间距 / 字号集中在 `Theme.swift`，便于后续做主题包
 
@@ -194,10 +196,10 @@ Sources/
 │   └── Gameshell-Bridging-Header.h
 └── UI/                         # Swift：SwiftUI 界面
     ├── Theme.swift             # 设计令牌（颜色/圆角/间距/字号/尺寸）
-    ├── Components/             # 顶栏、方块卡片（PS5 风格）、封面
-    ├── Screens/                # 主界面 / 播放器（WebView）/ 模拟器（EmulatorView）
-    ├── Emulator/               # ROM 库分区 + 自绘虚拟手柄
-    └── Overlay/                # 自绘浮层 + 添加 URL 表单 + 导入 ROM 浮层
+    ├── Components/             # 顶栏、方块卡片（PS5 风格）、封面（远程/本地/徽标三态）
+    ├── Screens/                # 主界面 / 设置页 / 播放器（WebView）/ 模拟器（EmulatorView）
+    ├── Emulator/               # 核心状态表 + 自绘虚拟手柄 + 键盘捕获 + 输入汇总
+    └── Overlay/                # 自绘浮层 + 添加 URL 表单 + 导入 ROM 浮层 + 文件选择器桥接
 Resources/
 ├── games.json                  # 内置兜底清单（默认为空）
 └── Assets.xcassets
@@ -210,6 +212,10 @@ build/cores/<平台>/             # 核心编译产物（lib*.a + 头文件，�
 
 用户数据：沙盒 Documents/games.json（App 内添加的条目）
          沙盒 Documents/ROMs/<系统>/（自己导入的 ROM 与 .sav 存档）
+         沙盒 Documents/Icons/<id>.<ext>（导入的条目图标）
+         沙盒 Documents/Covers/<系统>/<ROM>.png（抓取到的 ROM 封面）
+         沙盒 Documents/play_history.json（最近游玩）
+         沙盒 Documents/keymap.json（三端键位）
 ```
 
 ## 设计约束

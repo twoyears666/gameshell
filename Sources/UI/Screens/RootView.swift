@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 根视图：只有主界面 + 播放器全屏覆盖（网页 / 模拟器）+ 自绘浮层。
+/// 根视图：主界面 + 设置页覆盖层 + 播放器全屏覆盖（网页 / 模拟器）+ 自绘浮层。
 struct RootView: View {
     @EnvironmentObject private var state: AppState
 
@@ -9,6 +9,13 @@ struct RootView: View {
             Theme.Color.background.ignoresSafeArea()
 
             HomeView()
+
+            // 设置页：自绘覆盖层，压在播放器之下，进模拟器 / 网页时会被盖住
+            if state.settingsOpen {
+                SettingsView()
+                    .transition(.opacity)
+                    .zIndex(12)
+            }
 
             // 打开 http(s) 链接时全屏覆盖内置 WebView
             if let playing = state.playingGame {
@@ -35,5 +42,6 @@ struct RootView: View {
         }
         .animation(Theme.Motion.standard, value: state.playingGame?.identifier)
         .animation(Theme.Motion.standard, value: state.playingROM?.identifier)
+        .animation(Theme.Motion.standard, value: state.settingsOpen)
     }
 }

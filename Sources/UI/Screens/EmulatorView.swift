@@ -8,6 +8,9 @@
 //  CGImage）。这里用 CADisplayLink 按屏幕刷新率去取「最新一帧」，所以模拟速度与
 //  显示速度互不干扰：核心跑多快都不影响显示，掉帧只表现为画面重复。
 //
+//  输入：触屏（虚拟手柄）+ 硬件键盘（KeyboardCaptureView）+ 手柄（GSInputManager 转发）
+//  三路都交给 EmulatorInputCoordinator 汇总成一个 GSButton 位掩码，再进核心。
+//
 
 import SwiftUI
 import CoreGraphics
@@ -20,6 +23,7 @@ struct EmulatorView: View {
     @EnvironmentObject private var state: AppState
 
     @StateObject private var frames = EmulatorFrameSource()
+    @StateObject private var input = EmulatorInputCoordinator()
     @State private var isPaused = false
 
     var body: some View {
@@ -27,9 +31,21 @@ struct EmulatorView: View {
             SwiftUI.Color.black.ignoresSafeArea()
             content
             topBar
+
+            // 硬件键盘捕获（0 尺寸，不参与布局也不遮挡画面）
+            KeyboardCaptureView(isActive: true) { usage, pressed in
+                input.handleKeyboard(usage, pressed: pressed)
+            }
+            .frame(width: 0, height: 0)
         }
-        .onAppear { frames.attach(state.emulatorSession) }
-        .onDisappear { frames.detach() }
+        .onAppear {
+            frames.attach(state.emulatorSession)
+            input.attach(session: state.emulatorSession, mapping: state.keyMapping)
+        }
+        .onDisappear {
+            frames.detach()
+            input.detach()
+        }
     }
 
     // MARK: - 主体
@@ -69,12 +85,12 @@ struct EmulatorView: View {
                 if landscape {
                     ZStack {
                         screenLayer(viewport: screenArea)
-                        padLayer(area: padArea, session: session)
+                        padLayer(area: padArea)
                     }
                 } else {
                     VStack(spacing: 0) {
                         screenLayer(viewport: screenArea)
-                        padLayer(area: padArea, session: session)
+                        padLayer(area: padArea)
                     }
                 }
             }
@@ -112,9 +128,9 @@ struct EmulatorView: View {
         .frame(width: viewport.width, height: viewport.height)
     }
 
-    private func padLayer(area: CGSize, session: GSEmulatorSession) -> some View {
-        VirtualGamepad(size: area) { mask in
-            session.setButtonMask(mask)
+    private func padLayer(area: CGSize) -> some View {
+        VirtualGamepad(size: area, mapping: state.keyMapping) { mask in
+            input.setTouchMask(mask)
         }
         .frame(width: area.width, height: area.height)
     }

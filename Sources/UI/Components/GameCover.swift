@@ -1,10 +1,40 @@
 import SwiftUI
 
-/// 游戏封面 / 图标。
-/// 支持两种来源：远程图片 URL（icon 以 http 开头）或 SF Symbol 名称。
+/// 无图时的兜底内容：有短文字就显示文字（例如系统短名 "GBA"），否则画 SF Symbol。
+struct GSCoverFallback: View {
+    let text: String?
+    let symbol: String
+    let size: CGSize
+    var symbolScale: CGFloat = 0.42
+
+    var body: some View {
+        if let text, !text.isEmpty {
+            Text(text)
+                .font(.system(size: min(size.width, size.height) * 0.26, weight: .heavy))
+                .foregroundStyle(SwiftUI.Color.white.opacity(0.92))
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: min(size.width, size.height) * symbolScale, weight: .semibold))
+                .foregroundStyle(SwiftUI.Color.white.opacity(0.92))
+        }
+    }
+}
+
+/// 游戏封面 / 图标。三种来源，按 `source` 自动判断：
+///   · http(s) 远程图片 URL     → AsyncImage
+///   · 含 "/" 的相对路径         → 本地文件（Icons/… / Covers/…）
+///   · 其它（SF Symbol 名 / 空） → 兜底符号，或用 `fallbackText` 文字代替
 /// 纯本地绘制，不依赖任何占位图服务。
 struct GameCover: View {
-    let game: GSGame
+
+    /// 图标来源：GSGame.iconURLString 原样，或缓存好的封面相对路径
+    let source: String
+    /// 可选强调色（清单里的 accentHex），只影响无图时的底色渐变
+    var accentHex: String? = nil
+    /// 无图时显示的短文字（如系统短名 "GBA"）；为 nil 时画 SF Symbol
+    var fallbackText: String? = nil
+    /// 无图且无 fallbackText 时画的符号名
+    var fallbackSymbol: String = "gamecontroller.fill"
     var symbolScale: CGFloat = 0.42
     var cornerRadius: CGFloat = Theme.Radius.card
 
@@ -34,28 +64,41 @@ struct GameCover: View {
                 if let image = phase.image {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } else {
-                    symbol(in: size)
+                    fallback(in: size)
                 }
             }
+        } else if let path = localRelativePath {
+            LocalCoverImage(relativePath: path) {
+                fallback(in: size)
+            }
         } else {
-            symbol(in: size)
+            fallback(in: size)
         }
     }
 
-    private func symbol(in size: CGSize) -> some View {
-        Image(systemName: game.iconURLString.isEmpty ? "gamecontroller.fill" : game.iconURLString)
-            .font(.system(size: min(size.width, size.height) * symbolScale, weight: .semibold))
-            .foregroundStyle(SwiftUI.Color.white.opacity(0.92))
+    private func fallback(in size: CGSize) -> GSCoverFallback {
+        GSCoverFallback(text: fallbackText,
+                        symbol: symbolName,
+                        size: size,
+                        symbolScale: symbolScale)
+    }
+
+    private var symbolName: String {
+        source.isEmpty ? fallbackSymbol : source
     }
 
     private var remoteURL: URL? {
-        let raw = game.iconURLString
-        guard raw.lowercased().hasPrefix("http") else { return nil }
-        return URL(string: raw)
+        guard source.lowercased().hasPrefix("http") else { return nil }
+        return URL(string: source)
+    }
+
+    private var localRelativePath: String? {
+        guard source.contains("/") else { return nil }
+        return source
     }
 
     private var accent: SwiftUI.Color {
-        if let hex = game.accentHex, let color = SwiftUI.Color(hexString: hex) {
+        if let hex = accentHex, let color = SwiftUI.Color(hexString: hex) {
             return color
         }
         return Theme.Color.accent

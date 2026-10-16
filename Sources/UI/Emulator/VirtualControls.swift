@@ -11,7 +11,8 @@
 //    · 底部 START / SELECT
 //    · 顶部 L / R 肩键
 //
-//  所有按键状态合并成一个 GSButton 位掩码交给 GSEmulatorSession.setButtonMask(_:)。
+//  各按键簇显示与否、整体缩放与透明度都来自 GSKeyMapping（设置页里可调）。
+//  所有按键状态合并成一个 GSButton 位掩码交给上层，最终进 GSEmulatorSession.setButtonMask(_:)。
 //
 
 import SwiftUI
@@ -23,6 +24,8 @@ struct VirtualGamepad: View {
 
     /// 手柄可用的区域尺寸（横屏=整屏，竖屏=画面下方的操作区）
     let size: CGSize
+    /// 三端键位配置：决定缩放 / 透明度 / 各按键簇是否显示
+    let mapping: GSKeyMapping
     /// 位掩码变化回调（按下/抬起都会回传一次完整掩码）
     var onMaskChange: (GSButton) -> Void
 
@@ -33,36 +36,52 @@ struct VirtualGamepad: View {
 
     private var combinedMask: GSButton { held.union(dpadMask) }
 
+    /// 整体缩放：键位配置限制在 0.6 – 1.4
+    private var scale: CGFloat { max(0.6, min(1.4, mapping.touchScale)) }
+    /// 整体透明度：0.3 – 1.0
+    private var opacity: Double { Double(max(0.3, min(1.0, mapping.touchOpacity))) }
+
     var body: some View {
         ZStack {
             SwiftUI.Color.clear
 
             // 左：十字键
-            DPadControl(size: dpadSize) { mask in
-                dpadMask = mask
-                onMaskChange(combinedMask)
+            if mapping.touchShowDPad {
+                DPadControl(size: dpadSize) { mask in
+                    dpadMask = mask
+                    onMaskChange(combinedMask)
+                }
+                .position(x: margin + dpadSize / 2, y: size.height - margin - dpadSize / 2)
             }
-            .position(x: margin + dpadSize / 2, y: size.height - margin - dpadSize / 2)
 
             // 右：A / B
-            faceCluster
-                .position(x: size.width - margin - faceClusterSize / 2,
-                          y: size.height - margin - faceClusterSize / 2)
+            if mapping.touchShowFace {
+                faceCluster
+                    .position(x: size.width - margin - faceClusterSize / 2,
+                              y: size.height - margin - faceClusterSize / 2)
+            }
 
             // 顶部：L / R
-            key(label: "L", bit: .L, width: shoulderWidth, height: shoulderHeight, fontSize: 14)
-                .position(x: margin + shoulderWidth / 2, y: margin + shoulderHeight / 2)
-            key(label: "R", bit: .R, width: shoulderWidth, height: shoulderHeight, fontSize: 14)
-                .position(x: size.width - margin - shoulderWidth / 2, y: margin + shoulderHeight / 2)
+            if mapping.touchShowShoulders {
+                key(label: "L", bit: .L, width: shoulderWidth, height: shoulderHeight, fontSize: 14)
+                    .position(x: margin + shoulderWidth / 2, y: margin + shoulderHeight / 2)
+                key(label: "R", bit: .R, width: shoulderWidth, height: shoulderHeight, fontSize: 14)
+                    .position(x: size.width - margin - shoulderWidth / 2, y: margin + shoulderHeight / 2)
+            }
 
             // 底部中间：START / SELECT
-            HStack(spacing: pillSpacing) {
-                key(label: "SELECT", bit: .select, width: pillWidth, height: pillHeight, fontSize: 11)
-                key(label: "START", bit: .start, width: pillWidth, height: pillHeight, fontSize: 11)
+            if mapping.touchShowStartSelect {
+                HStack(spacing: pillSpacing) {
+                    key(label: "SELECT", bit: .select, width: pillWidth, height: pillHeight, fontSize: 11)
+                    key(label: "START", bit: .start, width: pillWidth, height: pillHeight, fontSize: 11)
+                }
+                .position(x: size.width / 2, y: size.height - margin - pillHeight / 2)
             }
-            .position(x: size.width / 2, y: size.height - margin - pillHeight / 2)
         }
         .frame(width: size.width, height: size.height)
+        // 缩放 / 透明度直接作用在整块手柄上：命中区域会跟着一起变换，触按位置不会错位。
+        .scaleEffect(scale)
+        .opacity(opacity)
     }
 
     // MARK: - 尺寸
