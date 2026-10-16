@@ -25,7 +25,7 @@ struct TouchLayoutEditor: View {
     /// 一次拖拽 / 缩放的起点（手势过程中不变，避免累积误差）
     @State private var gestureOrigin: GSTouchClusterLayout?
 
-    private static let clusters: [GSTouchCluster] = [.dPad, .face, .l, .r, .startSelect]
+    private static let clusters: [GSTouchCluster] = [.dPad, .face, .L, .R, .startSelect]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -123,8 +123,8 @@ struct TouchLayoutEditor: View {
             DPadControl(size: metrics.dpadSize * clusterLayout.scale, interactive: false) { _ in }
         case .face:
             GamepadFaceCluster(diameter: metrics.faceDiameter * clusterLayout.scale, interactive: false)
-        case .l, .r:
-            GamepadKey(label: cluster == .l ? "L" : "R",
+        case .L, .R:
+            GamepadKey(label: cluster == .L ? "L" : "R",
                        width: metrics.shoulderWidth * clusterLayout.scale,
                        height: metrics.shoulderHeight * clusterLayout.scale,
                        fontSize: 14 * clusterLayout.scale,
@@ -292,7 +292,7 @@ struct TouchLayoutEditor: View {
         switch cluster {
         case .dPad:        return mapping.touchShowDPad
         case .face:        return mapping.touchShowFace
-        case .l, .r:       return mapping.touchShowShoulders
+        case .L, .R:       return mapping.touchShowShoulders
         case .startSelect: return mapping.touchShowStartSelect
         default:           return true
         }

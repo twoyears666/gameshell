@@ -46,7 +46,7 @@ struct GamepadMetrics {
             return CGSize(width: dpadSize * scale, height: dpadSize * scale)
         case .face:
             return CGSize(width: faceClusterSize * scale, height: faceClusterSize * scale)
-        case .l, .r:
+        case .L, .R:
             return CGSize(width: shoulderWidth * scale, height: shoulderHeight * scale)
         case .startSelect:
             return CGSize(width: (pillWidth * 2 + pillSpacing) * scale, height: pillHeight * scale)
@@ -138,19 +138,19 @@ struct VirtualGamepad: View {
     /// 顶部：L / R
     @ViewBuilder
     private var shoulderNodes: some View {
-        let left = layout(.l)
+        let left = layout(.L)
         key(label: "L", bit: .L,
             width: metrics.shoulderWidth * left.scale,
             height: metrics.shoulderHeight * left.scale,
             fontSize: 14 * left.scale)
-            .position(center(.l))
+            .position(center(.L))
 
-        let right = layout(.r)
+        let right = layout(.R)
         key(label: "R", bit: .R,
             width: metrics.shoulderWidth * right.scale,
             height: metrics.shoulderHeight * right.scale,
             fontSize: 14 * right.scale)
-            .position(center(.r))
+            .position(center(.R))
     }
 
     /// 底部中间：START / SELECT
