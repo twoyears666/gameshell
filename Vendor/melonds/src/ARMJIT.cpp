@@ -22,6 +22,10 @@
 #include <assert.h>
 #include <unordered_map>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash/xxhash.h"
 
@@ -1189,7 +1193,9 @@ void ResetBlockCache()
 
 void JitEnableWrite()
 {
-    #if defined(__APPLE__) && defined(__aarch64__)
+    // iOS 上该 API 不可用（Apple 文档：pthread_jit_write_protect_np() 在 iOS 上不可用）；
+    // iOS 的 MAP_JIT 区域本身即可写可执行，无需切换 W^X。macOS 行为保持不变。
+    #if defined(__APPLE__) && defined(__aarch64__) && TARGET_OS_OSX
         if (__builtin_available(macOS 11.0, *))
             pthread_jit_write_protect_np(false);
     #endif
@@ -1197,7 +1203,8 @@ void JitEnableWrite()
 
 void JitEnableExecute()
 {
-    #if defined(__APPLE__) && defined(__aarch64__)
+    // 同上：iOS 不切换 W^X，仅 macOS 需要。
+    #if defined(__APPLE__) && defined(__aarch64__) && TARGET_OS_OSX
         if (__builtin_available(macOS 11.0, *))
             pthread_jit_write_protect_np(true);
     #endif
