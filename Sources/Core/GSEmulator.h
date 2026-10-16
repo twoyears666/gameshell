@@ -118,7 +118,7 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 /// 触摸屏（NDS 下屏等）。point 是触摸区内的归一化坐标（0–1，原点在触摸区左上角），
 /// active 表示手指当前是否按下。只有支持触摸的核心才实现它。
 @optional
-- (void)setTouchPoint:(CGPoint)point active:(BOOL)active;
+- (void)setTouchPoint:(CGPoint)point active:(BOOL)active NS_SWIFT_NAME(setTouchPoint(_:active:));
 
 @end
 
@@ -156,7 +156,7 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 
 /// 触摸屏（NDS 下屏等）：point 是触摸区内的归一化坐标（0–1），active 表示是否按下。
 /// 不支持触摸的核心会忽略；只写「待生效」状态，真正下发在模拟线程里（线程安全）。
-- (void)setTouchPoint:(CGPoint)point active:(BOOL)active;
+- (void)setTouchPoint:(CGPoint)point active:(BOOL)active NS_SWIFT_NAME(setTouchPoint(_:active:));
 
 // MARK: - 音频（由 Swift 侧的 AVAudioEngine 拉取）
 
