@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  只给 TrollStore 的 .tipa 用的 entitlements：在最小集之上加 JIT 相关项。
+  TrollStore 安装 IPA 时会保留二进制自带的 entitlements，所以这份文件里的
+  JIT 项会随 tipa 一起被保留下来，装好后无需再手动开一次 JIT。
+
+  ⚠️ 诚实说明（见 REFERENCE.md）：
+  TrollStore 官方文档把 dynamic-codesigning 与 com.apple.private.cs.debugger
+  列为「iOS 15 + A12 及以上被封禁的 entitlement」——带这两项签名的 App 在这些
+  系统上可能启动即崩。因此：
+    · 普通 IPA 用最小集（Gameshell-iOS.entitlements），不带 JIT 项；
+    · 只有这个 tipa 带 JIT 项，供 TrollStore / 支持这些 entitlement 的环境使用。
+  正规开发者证书签名时不要用这份文件（那份由描述文件决定）。
+-->
+<dict>
+	<key>application-identifier</key>
+	<string>com.twoyears666.gameshell</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>com.twoyears666.gameshell</string>
+	</array>
+	<key>get-task-allow</key>
+	<true/>
+	<!-- JIT：允许运行时生成可执行代码 -->
+	<key>dynamic-codesigning</key>
+	<true/>
+	<key>com.apple.private.cs.debugger</key>
+	<true/>
+</dict>
+</plist>

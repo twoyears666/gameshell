@@ -76,7 +76,7 @@
 | 键鼠在线探测（GCKeyboard / GCMouse，iOS 14+） | ✅ 已实现 | `GSInputManager.m` |
 | GitHub Actions CI（iOS 真机 + macOS 编译） | ✅ 已实现 | `.github/workflows/build.yml` |
 | IPA 打包（`Payload/Gameshell.app` → `.ipa`） | ✅ 已实现（**ad-hoc 自签名**，非开发者证书签名） | `.github/workflows/build.yml` |
-| TrollStore 用的 `.tipa` | ✅ 已实现（内容与 IPA 相同，仅后缀不同） | `.github/workflows/build.yml` |
+| TrollStore 用的 `.tipa` | ✅ 已实现（在最小 entitlements 之上**额外带 JIT entitlements**，TrollStore 安装时保留） | `.github/workflows/build.yml` + `Signing/Gameshell-iOS-JIT.entitlements` |
 | **模拟器：ROM 导入**（App 内文件选择器 → 复制进沙盒 `Documents/ROMs/<系统>/`，重名加序号不覆盖） | ✅ 已实现（iOS） | `Sources/Core/GSROMLibrary.m` + `Sources/UI/Overlay/ImportROMSheet.swift` |
 | **模拟器：GBA / GB / GBC 实机模拟**（mGBA 静态链接进主二进制） | ✅ 已实现（iOS） | `Sources/Core/GSMGBACore.m` + `Sources/Core/GSEmulator.m` |
 | **模拟器：NES 实机模拟**（Nestopia 静态链接进主二进制；256×240 RGBA 画面 + 单声道扩立体声 + 电池存档） | ✅ 已实现（iOS），CI 已确认 `libnestopia.a` 编出并链接通过 | `Sources/Core/GSNestopiaCore.mm` + `Sources/Core/GSEmulator.m` |
@@ -86,6 +86,7 @@
 | **模拟器：自绘虚拟手柄**（十字键八向 + A / B + START / SELECT + L / R） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` |
 | **模拟器：ROM 并入游戏库**（统一方块行，卡片带系统徽标 / 封面）+ 设置页「核心接入状态表」 | ✅ 已实现（iOS） | `Sources/UI/Components/LibraryItem.swift` + `Sources/UI/Components/GameCard.swift` + `Sources/UI/Emulator/CoreStatusList.swift` |
 | **模拟器：JIT 能力探测**（真的去 `mmap(MAP_JIT)` 试探）+ TrollStore 探测 | ✅ 已实现 | `GSJIT`（`Sources/Core/GSEmulator.m`） |
+| **TrollStore tipa 内置 JIT entitlements**（`dynamic-codesigning` + `com.apple.private.cs.debugger`） | ✅ 已实现（⚠️ 这些 entitlement 在 iOS 15 + A12+ 被封禁，带它们签名的 App 在那些系统上可能崩溃；故只签进 tipa、普通 IPA 不带） | `Signing/Gameshell-iOS-JIT.entitlements` + `.github/workflows/build.yml` |
 | **模拟器：核心编译期降级**（某个核心没编出来 → 该项目如实标成「不可用」，不拖垮整个构建） | ✅ 已实现 | `Scripts/build_cores.sh` + `Sources/Core/GSBuiltCoresCompat.h` |
 
 > **诚实补一句**：上表「已实现」指的是**代码已写完并进入 CI 构建**。

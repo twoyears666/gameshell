@@ -59,19 +59,21 @@ xcodebuild -project Gameshell.xcodeproj -scheme Gameshell \
 
 ## CI 产物
 
-每次推送到 `main`，[.github/workflows/build.yml](.github/workflows/build.yml) 会在 `macos-15` 上跑完整流程并上传：
+每次推送到 `main` / `feat/**` / `fix/**`（或 PR 到 `main`），[.github/workflows/build.yml](.github/workflows/build.yml) 会在 `macos-15` 上跑完整流程并上传：
 
 | 产物 | 内容 | 签名状态 |
 | --- | --- | --- |
 | `Gameshell-macOS` | macOS `.app` | **ad-hoc 自签名** |
 | `Gameshell-IPA` | iOS 真机 `.ipa`（`Payload/Gameshell.app`） | **ad-hoc 自签名 + 最小 entitlements**，非开发者证书签名 |
-| `Gameshell-TrollStore-tipa` | 与 IPA 内容相同的 `.tipa`，便于 TrollStore 识别 | 同上 |
+| `Gameshell-TrollStore-tipa` | iOS 真机 `.tipa`：在最小集之上**额外带 JIT entitlements**（`dynamic-codesigning` + `com.apple.private.cs.debugger`），TrollStore 安装时会保留，装好即具备 JIT | **ad-hoc 自签名 + JIT entitlements**，非开发者证书签名 |
 
 > ⚠️ **诚实说明**：CI 产出的 IPA / tipa 是 **未签名 + `codesign -s -` ad-hoc 自签名** 的包
-> （entitlements 见 [Signing/Gameshell-iOS.entitlements](Signing/Gameshell-iOS.entitlements)），
+> （普通 IPA 用 [Signing/Gameshell-iOS.entitlements](Signing/Gameshell-iOS.entitlements)，tipa 用 [Signing/Gameshell-iOS-JIT.entitlements](Signing/Gameshell-iOS-JIT.entitlements)），
 > 只能通过 **TrollStore（巨魔）** 或侧载工具安装 / 重签，
 > **不能**直接装到未越狱设备、也**不能**上架 App Store。
 > 正规签名的 IPA 需要 Apple 开发者证书与描述文件，属于**未完成**部分（见 [REFERENCE.md](REFERENCE.md)）。
+>
+> ⚠️ **JIT 的代价**：`dynamic-codesigning` 与 `com.apple.private.cs.debugger` 在 **iOS 15 + A12 及以上**被系统列为**封禁 entitlement**，带它们签名的 App 在那些系统上**可能启动即崩**。因此 JIT 只签进 tipa、普通 IPA 不带；在这些系统上请改用 TrollStore 的「开启 JIT」或 StikDebug。
 
 安装注意：
 
@@ -170,6 +172,7 @@ iOS 15 + A12 起系统封禁了 `dynamic-codesigning` 与 `com.apple.private.cs.
 
 1. **TrollStore（巨魔）安装**：装好后即为 App 打开了 JIT 权限。若进 App 仍提示未开，点提示条上的「开启 JIT」——
    App 会用 `apple-magnifier://enable-jit?bundle-id=<本 App bundle-id>` 拉起 TrollStore 开一次，回到 App 点「重试」。
+   另外，CI 产出的 `Gameshell-TrollStore-tipa` 已**内置 JIT entitlements**（TrollStore 安装时会保留），装好通常即带 JIT。
 2. **普通侧载（没有 TrollStore）**：用 **StikDebug** 附加调试器后再启动 App，由调试器授予 JIT。
 
 > 现状：**目前还没有任何依赖 JIT 的核心真正接入**，上面两条路径是为后续接入准备的；现在 JIT 探测结果只用于**如实展示状态**。

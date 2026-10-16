@@ -1,45 +1,52 @@
-name: Build
+name: 编译 iOS / macOS 并打包 IPA（未签名）
+
+# 产出「未签名 + ad-hoc 自签名」的包，供 TrollStore / 侧载工具使用：
+#   · Gameshell.ipa         —— 最小 entitlements，通用侧载 / TrollStore 都能装
+#   · Gameshell.tipa        —— 在最小集之上带 JIT entitlements（由 TrollStore 安装时保留）
+#   · Gameshell-macOS.app   —— macOS 版（ad-hoc 自签名）
+# 正规签名的 IPA 需要 Apple 开发者证书与描述文件，属未完成项（见 REFERENCE.md）。
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build (iOS + macOS + IPA)
+    name: 编译 iOS + macOS + 打包 IPA / tipa
     runs-on: macos-15
     timeout-minutes: 60
 
     steps:
-      - name: Checkout
+      - name: 检出源码
         uses: actions/checkout@v4
 
-      - name: Show toolchain
+      - name: 打印工具链版本（Xcode / Swift / CMake）
         run: |
           xcodebuild -version
           swift --version
           cmake --version || true
 
-      - name: Install XcodeGen + CMake
+      - name: 安装 XcodeGen 与 CMake
         run: brew install xcodegen cmake
 
-      - name: Generate Xcode project
+      - name: 用 XcodeGen 生成 Gameshell.xcodeproj
         run: xcodegen generate
 
-      - name: Show available SDKs
+      - name: 列出可用 SDK
         run: xcodebuild -showsdks
 
-      # ---------- iOS 真机（用于打包 IPA / tipa） ----------
-      # 说明：这里产出的是「未签名 + ad-hoc 自签名」包，供 TrollStore / 侧载工具使用。
-      # 正规签名的 IPA 需要 Apple 开发者证书与描述文件（当前未完成，见 REFERENCE.md）。
-      - name: Build iOS (Device, unsigned)
+      # ---------- iOS 真机（打包 IPA / tipa） ----------
+      - name: 编译 iOS 真机（未签名）
         run: |
           set -o pipefail
           xcodebuild \
@@ -54,8 +61,8 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      # 核心是交叉编译出来的：不管成功失败都把开关头和日志打出来，方便定位问题
-      - name: Report emulator core status
+      # 核心是交叉编译出来的：不管成功失败都把开关头与日志打出来，便于定位问题
+      - name: 打印模拟器核心编译状态（成功失败都打）
         if: always()
         run: |
           echo "---- build/cores/iphoneos ----"
@@ -69,7 +76,7 @@ jobs:
             tail -n 60 "$log" || true
           done
 
-      - name: Ad-hoc sign app
+      - name: ad-hoc 自签名 iOS App（最小 entitlements）
         run: |
           set -euo pipefail
           APP="build/DerivedData-Device/Build/Products/Release-iphoneos/Gameshell.app"
@@ -78,22 +85,39 @@ jobs:
             --entitlements Signing/Gameshell-iOS.entitlements \
             "$APP"
           codesign --verify --verbose=2 "$APP"
+          echo "---- 生效的 entitlements ----"
           codesign -d --entitlements :- "$APP"
 
-      - name: Package IPA + tipa
+      - name: 打包 IPA（最小 entitlements）
         run: |
           set -euo pipefail
           APP="build/DerivedData-Device/Build/Products/Release-iphoneos/Gameshell.app"
-          rm -rf build/Payload
-          mkdir -p build/Payload
-          cp -R "$APP" build/Payload/
-          ( cd build && zip -qry Gameshell.ipa Payload )
-          # tipa 与 ipa 内容一致，仅后缀不同，便于 TrollStore 识别
-          cp build/Gameshell.ipa build/Gameshell.tipa
-          ls -lh build/Gameshell.ipa build/Gameshell.tipa
+          rm -rf build/payload-ipa
+          mkdir -p build/payload-ipa/Payload
+          cp -R "$APP" build/payload-ipa/Payload/
+          ( cd build/payload-ipa && zip -qry ../Gameshell.ipa Payload )
+          ls -lh build/Gameshell.ipa
+
+      # 单独一份：复制未签 App → 用 JIT entitlements 重签 → 打包成 tipa。
+      # TrollStore 安装时会保留二进制自带的 entitlements，装好后即带 JIT。
+      - name: 用 JIT entitlements 重签并打包 TrollStore tipa
+        run: |
+          set -euo pipefail
+          APP="build/DerivedData-Device/Build/Products/Release-iphoneos/Gameshell.app"
+          rm -rf build/payload-tipa
+          mkdir -p build/payload-tipa/Payload
+          cp -R "$APP" build/payload-tipa/Payload/
+          codesign --force --deep --sign - \
+            --entitlements Signing/Gameshell-iOS-JIT.entitlements \
+            build/payload-tipa/Payload/Gameshell.app
+          codesign --verify --verbose=2 build/payload-tipa/Payload/Gameshell.app
+          echo "---- tipa 生效的 entitlements ----"
+          codesign -d --entitlements :- build/payload-tipa/Payload/Gameshell.app
+          ( cd build/payload-tipa && zip -qry ../Gameshell.tipa Payload )
+          ls -lh build/Gameshell.tipa
 
       # ---------- macOS ----------
-      - name: Build macOS
+      - name: 编译 macOS（未签名）
         run: |
           set -o pipefail
           xcodebuild \
@@ -109,30 +133,33 @@ jobs:
 
       # Apple Silicon 上未签名的 .app 会被 Gatekeeper 拦下（表现为「打不开」），
       # 所以这里同样做 ad-hoc 自签名。
-      - name: Ad-hoc sign macOS app
+      - name: ad-hoc 自签名 macOS App
         run: |
           set -euo pipefail
           APP="build/DerivedData-macOS/Build/Products/Release/Gameshell.app"
           codesign --force --deep --sign - "$APP"
           codesign --verify --verbose=2 "$APP"
 
-      - name: Upload macOS app
+      - name: 上传 macOS .app
         uses: actions/upload-artifact@v4
         with:
           name: Gameshell-macOS
           path: build/DerivedData-macOS/Build/Products/Release/*.app
           if-no-files-found: error
+          retention-days: 30
 
-      - name: Upload IPA
+      - name: 上传 IPA（最小 entitlements）
         uses: actions/upload-artifact@v4
         with:
           name: Gameshell-IPA
           path: build/Gameshell.ipa
           if-no-files-found: error
+          retention-days: 30
 
-      - name: Upload TrollStore tipa
+      - name: 上传 TrollStore tipa（带 JIT entitlements）
         uses: actions/upload-artifact@v4
         with:
           name: Gameshell-TrollStore-tipa
           path: build/Gameshell.tipa
           if-no-files-found: error
+          retention-days: 30
