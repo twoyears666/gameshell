@@ -35,7 +35,7 @@ typedef void (^GSInputButtonHandler)(NSString *identifier, BOOL pressed);
 @property (nonatomic, weak, nullable) id<GSInputManagerDelegate> delegate;
 @property (nonatomic, copy, readonly) GSInputSnapshot *snapshot;
 
-+ (instancetype)sharedManager NS_SWIFT_NAME(shared);
++ (instancetype)sharedManager NS_SWIFT_NAME(shared());
 
 - (void)startMonitoring;
 - (void)stopMonitoring;

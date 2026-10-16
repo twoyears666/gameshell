@@ -56,7 +56,7 @@ typedef NS_ENUM(NSInteger, GSTouchCluster) {
 
 @interface GSKeyMapping : NSObject
 
-+ (instancetype)sharedMapping NS_SWIFT_NAME(shared);
++ (instancetype)sharedMapping NS_SWIFT_NAME(shared());
 
 #pragma mark - 触屏整体（全局，不分系统）
 

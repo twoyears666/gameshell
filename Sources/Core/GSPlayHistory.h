@@ -34,7 +34,7 @@ typedef NS_ENUM(NSInteger, GSPlayHistoryKind) {
 
 @interface GSPlayHistory : NSObject
 
-+ (instancetype)sharedHistory NS_SWIFT_NAME(shared);
++ (instancetype)sharedHistory NS_SWIFT_NAME(shared());
 
 /// 记一次游玩：已存在则刷新时间并提到最前，不存在则新建；顺带裁剪到上限
 - (void)recordIdentifier:(NSString *)identifier kind:(GSPlayHistoryKind)kind;

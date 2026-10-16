@@ -18,7 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface GSCoverFetcher : NSObject
 
-+ (instancetype)sharedFetcher NS_SWIFT_NAME(shared);
++ (instancetype)sharedFetcher NS_SWIFT_NAME(shared());
 
 /// 该系统在 libretro-thumbnails 上的目录名（例如 "Nintendo - Game Boy Advance"）；
 /// 没有对应目录的系统返回 nil

@@ -16,7 +16,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface GSIconStore : NSObject
 
-+ (instancetype)sharedStore NS_SWIFT_NAME(shared);
++ (instancetype)sharedStore NS_SWIFT_NAME(shared());
 
 /// 图标根目录 Documents/Icons（会自动创建）
 + (nullable NSURL *)iconsRootURL;
