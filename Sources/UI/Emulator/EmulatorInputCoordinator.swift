@@ -60,7 +60,7 @@ final class EmulatorInputCoordinator: ObservableObject {
     /// 硬件键盘的按下 / 抬起
     func handleKeyboard(_ usage: UIKeyboardHIDUsage, pressed: Bool) {
         guard let mapping else { return }
-        let button = mapping.buttonForKeyboardUsage(usage.rawValue)
+        let button = mapping.button(forKeyboardUsage: usage.rawValue)
         guard button.rawValue != 0 else { return }
 
         if pressed {
@@ -74,7 +74,7 @@ final class EmulatorInputCoordinator: ObservableObject {
     /// 手柄按键（identifier 是 GCController 的按钮字典键）
     private func handleGamepad(_ identifier: String, pressed: Bool) {
         guard let mapping else { return }
-        let button = mapping.buttonForGamepadIdentifier(identifier)
+        let button = mapping.button(forGamepadIdentifier: identifier)
         guard button.rawValue != 0 else { return }
 
         if pressed {

@@ -280,7 +280,7 @@ final class AppState: ObservableObject {
     private func refreshROMCovers() {
         var map: [String: String] = [:]
         for rom in roms {
-            if let path = GSCoverFetcher.cachedCoverRelativePath(forROM: rom) {
+            if let path = GSCoverFetcher.cachedCoverRelativePath(for: rom) {
                 map[rom.identifier] = path
             }
         }
