@@ -261,7 +261,18 @@ Compiler::Compiler()
     u8* pageAligned = (u8*)(((u64)JitMem & ~(pageSize - 1)) + pageSize);
     u64 alignedSize = (((u64)JitMem + sizeof(JitMem)) & ~(pageSize - 1)) - (u64)pageAligned;
     #ifdef __APPLE__
-        pageAligned = (u8*)mmap(NULL, 1024*1024*16, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT,-1, 0);
+        // iOS：进程拿不到 JIT 权限（没开 JIT / 无 cs.allow-jit entitlement）时，
+        // 带 MAP_JIT 的 mmap 会失败并返回 MAP_FAILED。上游此处不检查返回值，
+        // 拿到 MAP_FAILED 后 SetCodeBase((u8*)-1) 再往上面写，就直接 SIGSEGV ——
+        // 这正是「一打开 NDS 就闪退」的根因。
+        // 注意 NDS::Init() 在 JIT_ENABLED 编译进来时是**无条件**构造本对象的，
+        // 前端把 melonds_jit_enable 答成 disabled 也拦不住它。
+        // 兜底：只有 mmap 成功才换成这块可执行内存；失败就沿用上面按静态 JitMem
+        // 算出的指针（一块 16MB 的可读可写 BSS 缓冲）。此时 Config::JIT_Enable 为 false，
+        // 游戏由解释器执行，这块缓冲只用于构造期写入，永远不会被跳进去执行。
+        u8* jitRegion = (u8*)mmap(NULL, 1024*1024*16, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT,-1, 0);
+        if (jitRegion != MAP_FAILED)
+            pageAligned = jitRegion;
         JitEnableWrite();
     #else
         mprotect(pageAligned, alignedSize, PROT_EXEC | PROT_READ | PROT_WRITE);

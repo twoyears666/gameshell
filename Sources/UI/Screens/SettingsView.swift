@@ -36,6 +36,7 @@ struct SettingsView: View {
                     }
                     KeyboardSettingsCard(mapping: state.keyMapping, capture: capture)
                     GamepadSettingsCard(mapping: state.keyMapping, capture: capture)
+                    NDSSettingsCard()
                     CoreIntegrationCard()
                     resetCard
                     #else
@@ -640,6 +641,185 @@ private struct GamepadSettingsCard: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - NDS（BIOS / 固件 / 双屏布局）
+
+/// NDS 的 BIOS / 固件导入与运行选项。
+/// BIOS 与固件是任天堂版权文件，本 App 不内置任何一份，也不随包分发；
+/// 必须由用户用「文件」App 选自己的 bios7.bin / bios9.bin / firmware.bin 导入，
+/// 导入的统一落在沙盒 Documents/Bios/ —— 核心就是去这个目录按文件名取（见 GSNDSSupport）。
+private struct NDSSettingsCard: View {
+
+    private let support = GSNDSSupport.shared()
+
+    /// 每次导入 / 删除后自增，用来强制刷新「已导入 / 未导入」状态
+    @State private var revision = 0
+    /// 正在等用户选哪个 BIOS 文件（nil = 没在选）
+    @State private var pickingName: String?
+    /// 上一次导入失败的提示（没有就为 nil）
+    @State private var errorText: String?
+    @State private var screenLayout: GSNDSScreenLayout
+    @State private var bootDirectly: Bool
+
+    /// 三个固定文件：名字必须严格叫这三个，核心才认
+    private static let rows: [(name: String, title: String, note: String)] = [
+        (GSBiosFileName7, "bios7.bin", "ARM7 BIOS"),
+        (GSBiosFileName9, "bios9.bin", "ARM9 BIOS"),
+        (GSBiosFileNameFirmware, "firmware.bin", "固件；导入后才能进 DS 主界面"),
+    ]
+
+    init() {
+        let support = GSNDSSupport.shared()
+        _screenLayout = State(initialValue: support.screenLayout)
+        _bootDirectly = State(initialValue: support.bootDirectly)
+    }
+
+    var body: some View {
+        SettingsCard(title: "NDS（BIOS / 固件）",
+                     subtitle: "BIOS 与固件是任天堂版权文件，本 App 不内置：用「文件」App 选自己的 bios7.bin / bios9.bin / firmware.bin 导入") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Self.rows, id: \.name) { row in
+                        fileRow(row)
+                    }
+                }
+                .id(revision)
+
+                Rectangle()
+                    .fill(Theme.Color.border)
+                    .frame(height: 1)
+
+                pickerBlock(title: "双屏布局",
+                            selection: layoutBinding,
+                            options: [(GSNDSScreenLayout.topBottom, "上下"),
+                                      (GSNDSScreenLayout.leftRight, "左右"),
+                                      (GSNDSScreenLayout.topOnly, "只上屏"),
+                                      (GSNDSScreenLayout.bottomOnly, "只下屏")])
+
+                pickerBlock(title: "启动方式",
+                            selection: bootBinding,
+                            options: [(true, "直接进游戏"), (false, "先进 DS 主界面")])
+
+                if !support.hasBIOSFile(named: GSBiosFileNameFirmware) {
+                    Text("没导入 firmware.bin 时核心只能用合成固件，进不了 DS 主界面，只能直接进游戏。")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let errorText {
+                    Text(errorText)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        // 「浏览器」在 iOS 上只有 UIDocumentPicker 一条路，所以复用 ROM 导入那套桥接。
+        .background(
+            DocumentPickerBridge(isPresented: pickerPresented) { url in
+                importPicked(url)
+            }
+            .frame(width: 0, height: 0)
+        )
+    }
+
+    // MARK: 行 / 块
+
+    /// 一个 BIOS 文件行：状态图标 + 文件名 + 说明 + 导入 / 删除
+    private func fileRow(_ row: (name: String, title: String, note: String)) -> some View {
+        let imported = support.hasBIOSFile(named: row.name)
+        return HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: imported ? "checkmark.circle.fill" : "circle.dashed")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(imported ? Theme.Color.accent : Theme.Color.textTertiary)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.title)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Color.textPrimary)
+                Text(imported ? row.note : "未导入")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(imported ? Theme.Color.textSecondary : Theme.Color.textTertiary)
+            }
+
+            Spacer(minLength: 0)
+
+            PillButton(title: imported ? "重新导入" : "导入", style: .secondary) {
+                errorText = nil
+                pickingName = row.name
+            }
+            .frame(width: 84)
+
+            if imported {
+                PillButton(title: "删除", style: .secondary) {
+                    support.removeBIOSFile(named: row.name)
+                    revision += 1
+                }
+                .frame(width: 64)
+            }
+        }
+        .padding(.vertical, 1)
+    }
+
+    /// 一个小标题 + 分段选择器
+    private func pickerBlock<T: Hashable>(title: String,
+                                          selection: Binding<T>,
+                                          options: [(T, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(Theme.Font.chip)
+                .foregroundStyle(Theme.Color.textSecondary)
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.0) { option in
+                    Text(option.1).tag(option.0)
+                }
+            }
+            .pickerStyle(.segmented)
+            .tint(Theme.Color.accent)
+        }
+    }
+
+    // MARK: 绑定
+
+    private var layoutBinding: Binding<GSNDSScreenLayout> {
+        Binding(get: { screenLayout },
+                set: { newValue in
+                    screenLayout = newValue
+                    support.screenLayout = newValue
+                })
+    }
+
+    private var bootBinding: Binding<Bool> {
+        Binding(get: { bootDirectly },
+                set: { newValue in
+                    bootDirectly = newValue
+                    support.bootDirectly = newValue
+                })
+    }
+
+    /// 文件选择器是否在呈现中（由 pickingName 派生）
+    private var pickerPresented: Binding<Bool> {
+        Binding(get: { pickingName != nil },
+                set: { presented in
+                    if !presented { pickingName = nil }
+                })
+    }
+
+    private func importPicked(_ url: URL) {
+        guard let name = pickingName else { return }
+        do {
+            try support.importBIOSFile(at: url, as: name)
+            errorText = nil
+            GSLog.tag("nds", message: "已导入 \(name)")
+        } catch {
+            errorText = "导入 \(name) 失败：\(error.localizedDescription)"
+            GSLog.tag("nds", message: "导入 BIOS 失败：\(error.localizedDescription)")
+        }
+        revision += 1
     }
 }
 

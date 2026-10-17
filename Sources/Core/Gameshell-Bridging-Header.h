@@ -22,3 +22,6 @@
 #import "GSSystem.h"
 #import "GSROMLibrary.h"
 #import "GSEmulator.h"
+
+// NDS 专属：BIOS / 固件导入与双屏布局等选项
+#import "GSNDSSupport.h"

@@ -7,8 +7,12 @@
 //  入口只在设置页里（触摸卡片上的「编辑布局」），游玩界面（EmulatorView）不提供编辑入口，
 //  避免玩到一半误触把布局拖乱。编辑的是**当前所选系统**的布局（各系统分开保存）。
 //  每个按键（A / B / X / Y / L / R / START / SELECT / MENU）都是**独立元素**，互不绑定；
-//  十字键与 NDS 下屏触摸区是整体元素。改完立即写回 GSKeyMapping 内存，松手时落盘到 keymap.json。
+//  十字键是整体元素。改完立即写回 GSKeyMapping 内存，松手时落盘到 keymap.json。
 //  坐标是归一化的（相对手柄可用区域），所以横竖屏各自按自己的区域生效。
+//
+//  注意：NDS 的触摸屏（下屏）**不在这里摆放** —— 它在播放器里由核心渲染出的下屏矩形
+//  精确覆盖，位置与大小跟着双屏布局走（上下 / 左右 / 只下屏），无需也没有必要手工拖拽。
+//  它是否显示仍然由「触屏手柄」卡片里的「显示 触摸屏」开关决定。
 //
 
 #if os(iOS)
@@ -28,10 +32,12 @@ struct TouchLayoutEditor: View {
     /// 一次拖拽 / 缩放的起点（手势过程中不变，避免累积误差）
     @State private var gestureOrigin: GSTouchElementLayout?
 
-    /// 该系统的按键元素集合
+    /// 该系统的按键元素集合。
+    /// 不含触摸屏：NDS 下屏的位置与大小由画面里的下屏矩形决定，不在这里摆放。
     private var elements: [GSTouchElement] {
         GSKeyMapping.touchElements(forSystem: systemIdentifier)
             .compactMap { GSTouchElement(rawValue: $0.intValue) }
+            .filter { $0 != .touchScreen }
     }
 
     var body: some View {
@@ -133,10 +139,6 @@ struct TouchLayoutEditor: View {
         switch element {
         case .dPad:
             DPadControl(size: metrics.dpadSize * elementLayout.scale, interactive: false) { _ in }
-        case .touchScreen:
-            GamepadTouchScreen(size: CGSize(width: metrics.touchScreenWidth * elementLayout.scale,
-                                            height: metrics.touchScreenHeight * elementLayout.scale),
-                               interactive: false)
         case .A, .B, .X, .Y, .L, .R, .start, .select, .menu:
             keyView(element, metrics: metrics, elementLayout: elementLayout)
         default:
@@ -205,7 +207,8 @@ struct TouchLayoutEditor: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             elementChips
             sizeSlider
-            Text("每个按键都是独立的：位置与大小各自一套，改这个不会动到别的按键。屏幕坐标按手柄可用区域归一化：横屏用整屏，竖屏用画面下方的操作区。布局只对「\(systemTitle)」生效。")
+            Text("每个按键都是独立的：位置与大小各自一套，改这个不会动到别的按键。屏幕坐标按手柄可用区域归一化：横屏用整屏，竖屏用画面下方的操作区。布局只对「\(systemTitle)」生效。"
+                 + (systemIdentifier == "nds" ? " NDS 的触摸屏（下屏）不在这里摆放：它跟着画面里的下屏走，由 NDS 设置里的双屏布局决定。" : ""))
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.Color.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -269,14 +272,12 @@ struct TouchLayoutEditor: View {
             .tint(Theme.Color.accent)
 
             // 便捷功能：把当前这个按键的大小一次性应用到本系统所有按键（触摸屏是屏、不是按键，不动它）。
-            if selected != .touchScreen {
-                PillButton(title: "把这个大小应用到所有按键", style: .secondary) {
-                    mapping.applyScale(layout(selected).scale, toAllElementsForSystem: systemIdentifier)
-                    gestureOrigin = nil
-                    loadLayouts()
-                }
-                .padding(.top, Theme.Spacing.xxs)
+            PillButton(title: "把这个大小应用到所有按键", style: .secondary) {
+                mapping.applyScale(layout(selected).scale, toAllElementsForSystem: systemIdentifier)
+                gestureOrigin = nil
+                loadLayouts()
             }
+            .padding(.top, Theme.Spacing.xxs)
         }
     }
 

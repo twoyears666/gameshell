@@ -99,12 +99,12 @@ struct EmulatorView: View {
             Group {
                 if landscape {
                     ZStack {
-                        screenLayer(viewport: screenArea)
+                        screenLayer(viewport: screenArea, session: session)
                         padLayer(area: padArea, session: session)
                     }
                 } else {
                     VStack(spacing: 0) {
-                        screenLayer(viewport: screenArea)
+                        screenLayer(viewport: screenArea, session: session)
                         padLayer(area: padArea, session: session)
                     }
                 }
@@ -113,7 +113,7 @@ struct EmulatorView: View {
         }
     }
 
-    private func screenLayer(viewport: CGSize) -> some View {
+    private func screenLayer(viewport: CGSize, session: GSEmulatorSession) -> some View {
         ZStack {
             SwiftUI.Color.black
             if let image = frames.image {
@@ -122,6 +122,17 @@ struct EmulatorView: View {
                     .interpolation(.none)      // 像素风：放大不要糊
                     .resizable()
                     .frame(width: fitted.width, height: fitted.height)
+
+                // NDS：触摸层精确盖在**渲染出来的下屏矩形**上。
+                // 位置与大小都由核心的双屏布局决定（上下 / 左右 / 只下屏），
+                // 所以触摸位置天然跟着真实下屏走，不需要用户另外摆一块触摸板。
+                if let rect = ndsBottomScreenRect(fitted: fitted, viewport: viewport, session: session) {
+                    GamepadTouchScreen(size: rect.size,
+                                       onTouch: { point, active in
+                                           session.setTouchPoint(point, active: active)
+                                       })
+                        .position(x: rect.midX, y: rect.midY)
+                }
             } else {
                 Text("正在等第一帧画面…")
                     .font(Theme.Font.caption)
@@ -143,16 +154,32 @@ struct EmulatorView: View {
         .frame(width: viewport.width, height: viewport.height)
     }
 
+    /// NDS 下屏在画面上的矩形（相对 viewport 左上角）。
+    /// 返回 nil = 不是 NDS / 当前布局没有下屏（只上屏）/ 用户把这个元素隐藏了。
+    private func ndsBottomScreenRect(fitted: CGSize,
+                                     viewport: CGSize,
+                                     session: GSEmulatorSession) -> CGRect? {
+        guard session.systemInfo.identifier == "nds" else { return nil }
+        guard state.keyMapping.isElementVisible(.touchScreen, forSystem: "nds") else { return nil }
+
+        let normalized = GSNDSSupport.bottomScreenNormalizedRect(for: GSNDSSupport.shared().screenLayout)
+        guard !normalized.isNull else { return nil }
+
+        // 画面是等比居中放进 viewport 的，先算出它的左上角，再按归一化矩形切出下屏
+        let origin = CGPoint(x: (viewport.width - fitted.width) / 2,
+                             y: (viewport.height - fitted.height) / 2)
+        return CGRect(x: origin.x + normalized.minX * fitted.width,
+                      y: origin.y + normalized.minY * fitted.height,
+                      width: normalized.width * fitted.width,
+                      height: normalized.height * fitted.height)
+    }
+
     private func padLayer(area: CGSize, session: GSEmulatorSession) -> some View {
         VirtualGamepad(size: area,
                        mapping: state.keyMapping,
                        systemIdentifier: session.systemInfo.identifier,
                        onMaskChange: { mask in
                            input.setTouchMask(mask)
-                       },
-                       onTouch: { point, active in
-                           // 触摸屏（NDS 下屏）：把触摸区内的归一化坐标交给核心
-                           session.setTouchPoint(point, active: active)
                        },
                        onMenu: {
                            // NDS 的 Menu 键等价顶栏的暂停按钮

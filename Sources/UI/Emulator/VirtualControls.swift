@@ -10,14 +10,17 @@
 //    · 右侧 A / B（SNES / NDS 上是 A / B / X / Y 四键菱形）
 //    · 底部 START / SELECT
 //    · 顶部 L / R 肩键（8 位机没有）
-//    · NDS 额外：Menu（切换暂停菜单）+ 触摸屏（下屏）
+//    · NDS 额外：Menu（切换暂停菜单）
+//
+//  NDS 的触摸屏（下屏）**不在手柄里**：它由播放器按核心渲染出的下屏矩形精确覆盖
+//  （见 EmulatorView），所以触摸位置天然跟着真实下屏走，双屏布局怎么排都不会错位。
 //
 //  显示哪些按键、每个按键各自的位置与大小都**按系统区分**，来自 GSKeyMapping 的
 //  touchElementsForSystem: / layoutForElement:forSystem:；
 //  每个按键（A / B / X / Y / L / R / START / SELECT / MENU）都是**独立元素**，互不绑定；
 //  设置页里的「布局编辑器」可以逐个拖拽调整，游玩界面里不可编辑。
 //  按键状态合并成一个 GSButton 位掩码交给上层，最终进 GSEmulatorSession.setButtonMask(_:)；
-//  触摸屏另走 onTouch 归一化坐标，Menu 走 onMenu 回调。
+//  Menu 走 onMenu 回调。
 //
 
 import SwiftUI
@@ -41,9 +44,6 @@ struct GamepadMetrics {
     /// Menu 是单个胶囊按键
     var menuWidth: CGFloat { pillWidth }
     var menuHeight: CGFloat { pillHeight }
-    /// NDS 下屏触摸区（4:3，与 DS 下屏 256×192 同比例）
-    var touchScreenWidth: CGFloat { max(120, min(area.width * 0.34, 240)) }
-    var touchScreenHeight: CGFloat { touchScreenWidth * 0.75 }
 
     /// 某元素在给定布局下的尺寸 —— **每个按键各自一套**，播放器与编辑器共用（编辑器用它决定拖拽热区）
     func box(for element: GSTouchElement, layout: GSTouchElementLayout) -> CGSize {
@@ -59,8 +59,6 @@ struct GamepadMetrics {
             return CGSize(width: pillWidth * scale, height: pillHeight * scale)
         case .menu:
             return CGSize(width: menuWidth * scale, height: menuHeight * scale)
-        case .touchScreen:
-            return CGSize(width: touchScreenWidth * scale, height: touchScreenHeight * scale)
         default:
             return CGSize(width: faceDiameter * scale, height: faceDiameter * scale)
         }
@@ -81,8 +79,6 @@ struct VirtualGamepad: View {
     var systemIdentifier: String = ""
     /// 位掩码变化回调（按下/抬起都会回传一次完整掩码）
     var onMaskChange: (GSButton) -> Void
-    /// 触摸屏拖动：归一化坐标（0–1，相对触摸区）+ 是否按下
-    var onTouch: (CGPoint, Bool) -> Void = { _, _ in }
     /// Menu 键按下（切换游戏内暂停菜单；不参与位掩码）
     var onMenu: () -> Void = {}
 
@@ -124,7 +120,8 @@ struct VirtualGamepad: View {
 
     var body: some View {
         ZStack {
-            SwiftUI.Color.clear
+            // 空手白板：不参与命中，否则横屏时它会盖住画面、把 NDS 下屏的触摸一起吃掉
+            SwiftUI.Color.clear.allowsHitTesting(false)
 
             if shows(.dPad) { dpadNode }
             if shows(.A) { keyNode(.A) }
@@ -136,7 +133,6 @@ struct VirtualGamepad: View {
             if shows(.select) { keyNode(.select) }
             if shows(.start) { keyNode(.start) }
             if shows(.menu) { menuNode }
-            if shows(.touchScreen) { touchScreenNode }
         }
         .frame(width: size.width, height: size.height)
         // 缩放 / 透明度直接作用在整块手柄上：命中区域会跟着一起变换，触按位置不会错位。
@@ -189,16 +185,7 @@ struct VirtualGamepad: View {
         .position(center(.menu))
     }
 
-    /// NDS：触摸屏（下屏触摸区，整体元素）
-    private var touchScreenNode: some View {
-        let elementLayout = layout(.touchScreen)
-        return GamepadTouchScreen(size: CGSize(width: metrics.touchScreenWidth * elementLayout.scale,
-                                               height: metrics.touchScreenHeight * elementLayout.scale),
-                                  onTouch: onTouch)
-            .position(center(.touchScreen))
-    }
-
-    /// 元素 → GSButton 位（A/B/X/Y/L/R/START/SELECT；Menu / 触摸屏不参与位掩码，返回空集）
+    /// 元素 → GSButton 位（A/B/X/Y/L/R/START/SELECT；Menu 不参与位掩码，返回空集）
     private static func button(for element: GSTouchElement) -> GSButton {
         switch element {
         case .A:      return .A
@@ -389,54 +376,38 @@ struct GamepadKey: View {
 
 // MARK: - 触摸屏（NDS 下屏）
 
-/// 触摸屏按键簇：按住拖动，把簇内相对坐标（0–1）交给上层（onTouch）。
-/// 诚实的边界：这里给的是「触摸区自身」的归一化坐标，**不等于**渲染出来的下屏像素坐标，
-/// 也没有与画面上真实的下屏位置对齐 —— 它是一块专门的触摸板，核心按 DS 下屏（256×192）解释它。
-/// 布局编辑器里 interactive 传 false，只当作可拖拽的图形。
+/// NDS 下屏触摸区：把区域内归一化坐标（0–1）交给上层（onTouch）。
+///
+/// 它由 EmulatorView 按核心渲染出的下屏矩形**精确覆盖**，所以这里给出的归一化坐标
+/// 就是「下屏内坐标」，与核心 input.cpp 期待的 DS 下屏（256×192）一一对应，
+/// 双屏怎么排（上下 / 左右 / 只下屏）都不会错位。
+/// 外观刻意做得很淡 —— 只留一圈细描边，盖在真实画面上不碍事。
 struct GamepadTouchScreen: View {
+
     let size: CGSize
-    /// 是否响应触摸（布局编辑器里传 false，只当作可拖拽的图形）
-    var interactive: Bool = true
     var onTouch: (CGPoint, Bool) -> Void = { _, _ in }
 
     @State private var lastPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)
 
     var body: some View {
-        if interactive {
-            face.gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { value in
-                        let point = normalized(value.location)
-                        lastPoint = point
-                        onTouch(point, true)
-                    }
-                    .onEnded { _ in
-                        onTouch(lastPoint, false)
-                    }
-            )
-        } else {
-            face
-        }
+        face.gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .onChanged { value in
+                    let point = normalized(value.location)
+                    lastPoint = point
+                    onTouch(point, true)
+                }
+                .onEnded { _ in
+                    onTouch(lastPoint, false)
+                }
+        )
     }
 
     private var face: some View {
-        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-            .fill(Theme.Color.accent.opacity(0.16))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                    .stroke(Theme.Color.accent.opacity(0.75), lineWidth: 1.5)
-            )
-            .overlay(
-                VStack(spacing: 2) {
-                    Image(systemName: "hand.tap")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("触摸屏")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundStyle(Theme.Color.accent)
-                .allowsHitTesting(false)
-            )
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .stroke(Theme.Color.accent.opacity(0.4), lineWidth: 1)
             .frame(width: size.width, height: size.height)
+            // 描边中间是空的：显式声明命中区，否则下屏中间那块触摸不到
             .contentShape(Rectangle())
     }
 

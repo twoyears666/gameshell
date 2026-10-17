@@ -19,8 +19,10 @@
 //    对应宏 JIT_ENABLED / ARCHITECTURE_ARM64。
 //  - 运行时：由宿主按 GSJIT 的真实探测结果回答核心的 melonds_jit_enable 选项：
 //    设备拿得到可执行内存就答 enabled（走 JIT，快），否则答 disabled（走解释器，慢但能跑）。
-//    核心在 JIT_ENABLED 下 Config::JIT_Enable 默认是 true，所以「前端必须显式作答」——
-//    不回答的话，无 JIT 的设备会在 mmap(MAP_JIT) 失败处崩掉。
+//    JIT 不设用户开关：能用就用 —— 这是用户明确的要求。
+//  - 只答 disabled 还不够：NDS::Init() 在 JIT_ENABLED 下是**无条件**构造 JIT 编译器、
+//    执行 mmap(MAP_JIT) 的，没有权限时它拿到 MAP_FAILED 还照写，正是「一开 NDS 就闪退」
+//    的根因。所以 Vendor 侧另打了兜底补丁（ARMJIT_Compiler.cpp：mmap 失败就沿用静态缓冲）。
 //  - 因此 requiresJIT 返回 NO：解释器兜底，NDS 在任何设备上都打得开，只是速度不同。
 //
 //  画面格式：核心在 retro_load_game 里要求 RETRO_PIXEL_FORMAT_XRGB8888，
@@ -29,8 +31,9 @@
 //  所以这里**不需要**像 Mesen-S 那样交换 byte0/byte2，只把 alpha 补成不透明即可。
 //  行距一律用 video_refresh 回调传进来的 pitch，不假设它等于 width*4。
 //
-//  画面尺寸：默认选 Top/Bottom 双屏布局 → 256x384（VIDEO_WIDTH 256、单屏 192）。
-//  真实尺寸仍以每帧回调的 width/height 为准，缓冲按需 realloc。
+//  画面尺寸：随用户选的双屏布局而变 —— 上下 / 左右是 256x384 / 512x192，
+//  只上屏 / 只下屏是 256x192。真实尺寸仍以每帧回调的 width/height 为准，缓冲按需 realloc。
+//  布局由宿主答 melonds_screen_layout（取值见 GSNDSSupport）。
 //
 //  音频：核心的采样率固定 32768 Hz、帧率 32*1024*1024/560190 ≈ 59.826 fps，
 //  audio_callback 一律按「交错立体声」出货。libretro 的 audio_sample_batch 契约里
@@ -42,9 +45,12 @@
 //  所以宿主不需要管 .sav：只要把 GET_SAVE_DIRECTORY 答成 ROM 所在目录，
 //  核心算出来的路径就与 GSROMLibrary batterySaveURLForROM: 完全一致（同目录、同名 .sav）。
 //
-//  BIOS / 固件：我们不入库任何 BIOS。核心找不到 bios7/bios9/firmware.bin 时会打印提示
-//  并自动改用 FreeBIOS（VerifyDSBIOS 返回 Load_OK），NDS 也会自行合成固件。
-//  又因为我们把 melonds_boot_directly 答成 enabled，不会进固件菜单，直接进游戏。
+//  BIOS / 固件：我们不随 App 分发任何 BIOS。用户在设置页用「文件」App 把
+//  bios7.bin / bios9.bin / firmware.bin 导入到沙盒 Documents/Bios/，宿主把
+//  GET_SYSTEM_DIRECTORY 答成这个目录，核心便会按文件名去取（见 libretro.cpp 的
+//  _handle_load_game）。三件套不全时核心自动降级到 FreeBIOS + 合成固件，仍能直启进游戏；
+//  一旦导入了 firmware.bin，就把 melonds_boot_directly 答成 disabled，
+//  让核心先过一遍真固件、进 DS 主界面（见 gs_retro_lookup_variable）。
 //
 //  触摸：把 melonds_touch_mode 答成 Touch，核心便走 libretro 的 RETRO_DEVICE_POINTER
 //  （见 input.cpp 的 TouchMode::Touch 分支）。宿主经 setTouchPoint:active: 传「DS 下屏内的
@@ -68,6 +74,7 @@
 #if GS_HAVE_MELONDS
 
 #import "GSEmulator.h"
+#import "GSNDSSupport.h"
 
 // 先改名再取声明（关键顺序，别调换）：
 // 主二进制里同时链接了 Mesen-S，两个核心的 retro_* 入口点同名会撞车，
@@ -140,13 +147,16 @@ static bool gs_retro_lookup_variable(struct retro_variable *variable) {
         return true;
     }
     if (strcmp(key, "melonds_boot_directly") == 0) {
-        // 我们不带 BIOS / 固件，走固件菜单会卡在那儿，必须直启进游戏
-        variable->value = "enabled";
+        // 只有用户真的导入了 firmware.bin，才允许关掉直启、先过固件进 DS 主界面；
+        // 否则核心只能合成固件，走固件菜单会卡死在假固件里，必须直启进游戏。
+        GSNDSSupport *support = [GSNDSSupport shared];
+        BOOL hasFirmware = [support hasBIOSFileNamed: GSBiosFileNameFirmware];
+        variable->value = (hasFirmware && ![support bootDirectly]) ? "disabled" : "enabled";
         return true;
     }
     if (strcmp(key, "melonds_screen_layout") == 0) {
-        // 上下双屏，最直观；也是核心自己的局部默认值
-        variable->value = "Top/Bottom";
+        // 用户在设置页选的双屏布局（上下 / 左右 / 只上屏 / 只下屏）
+        variable->value = [[GSNDSSupport shared] melonDSScreenLayoutValue].UTF8String;
         return true;
     }
     if (strcmp(key, "melonds_language") == 0) {
@@ -402,17 +412,19 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
         return NO;
     }
 
-    // 核心要一个 system 目录（用来找 BIOS / 固件）。我们不入库任何 BIOS，
-    // 所以给 ROM 所在目录就够了；核心找不到会自行降级到 FreeBIOS。
-    // save 目录同样给 ROM 目录，这样核心算出的 .sav 与 GSROMLibrary 的命名一致。
-    NSString *directory = path.stringByDeletingLastPathComponent;
-    if (directory.length == 0) {
-        directory = NSTemporaryDirectory();
+    // save 目录给 ROM 所在目录：核心据此算出 <ROM 同名>.sav，与 GSROMLibrary 的命名一致。
+    NSString *saveDirectory = path.stringByDeletingLastPathComponent;
+    if (saveDirectory.length == 0) {
+        saveDirectory = NSTemporaryDirectory();
     }
+    // system 目录给 Documents/Bios：核心就是在这个目录里按文件名找
+    // bios7.bin / bios9.bin / firmware.bin（见 libretro.cpp 的 _handle_load_game），
+    // 找不到就降级到 FreeBIOS + 合成固件。
+    NSString *systemDirectory = [GSNDSSupport biosDirectoryURL].path;
 
     _romData = romData;
-    _systemDirCString = strdup(directory.fileSystemRepresentation);
-    _saveDirCString = strdup(directory.fileSystemRepresentation);
+    _systemDirCString = strdup(systemDirectory.fileSystemRepresentation);
+    _saveDirCString = strdup(saveDirectory.fileSystemRepresentation);
     _romPathCString = strdup(path.fileSystemRepresentation);
     if (_systemDirCString == NULL || _saveDirCString == NULL || _romPathCString == NULL) {
         if (error) {
@@ -544,30 +556,20 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 /// 触摸屏（DS 下屏）。point 是**下屏内的归一化坐标（0–1）**，本方法把它换算成
 /// libretro pointer 的 int16 坐标（0x8000 为缓冲中心偏移）。
 ///
-/// 换算依据（见 input.cpp 的 TouchMode::Touch 分支 + screenlayout.cpp 的 TopBottom 分支）：
-///   核心侧：x = (pointer_x + 0x8000) * buffer_width  / 0x10000
-///           y = (pointer_y + 0x8000) * buffer_height / 0x10000
-///   我们钉死 Top/Bottom 且不答 melonds_screen_gap（gap = 0），于是：
-///   buffer 256x384，下屏在缓冲下半 → touch_offset = (0, 192)、screen 尺寸 256x192。
-///   要让触摸落到下屏内点 (nx, ny)（nx/ny ∈ [0,1]）：
-///     buffer_x = 0 + nx*256    → pointer_x = nx * 0x10000 - 0x8000
-///     buffer_y = 192 + ny*192  → pointer_y = ny * 0x8000   （因 384 = 192*2）
-///   Hybrid 布局另有一个 touch_scale，我们不用 Hybrid，故不涉及。
+/// 换算依据（input.cpp 的 TouchMode::Touch 分支）：
+///   核心侧：buffer_x = (pointer_x + 0x8000) * buffer_width  / 0x10000
+///           buffer_y = (pointer_y + 0x8000) * buffer_height / 0x10000
+///   要让触摸落到「下屏矩形」内的点，就得先知道该布局下 buffer 有多大、下屏偏在哪 ——
+///   这随双屏布局而变（上下 → 下屏在下半；左右 → 下屏在右半；只下屏 → 整块就是下屏）。
+///   这些几何统一由 GSNDSSupport.pointerForNormalizedTouch:layout: 给出，
+///   播放器把触摸层盖在渲染出的下屏矩形上，传给你的 nx / ny 就是相对那块矩形的。
 - (void)setTouchPoint:(CGPoint)point active:(BOOL)active {
     _touchActive = active;
 
-    double nx = point.x;
-    double ny = point.y;
-    if (nx < 0.0) { nx = 0.0; } else if (nx > 1.0) { nx = 1.0; }
-    if (ny < 0.0) { ny = 0.0; } else if (ny > 1.0) { ny = 1.0; }
-
-    long pointerX = lrint((nx - 0.5) * 65536.0);
-    long pointerY = lrint(ny * 32768.0);
-    if (pointerX < -32768) { pointerX = -32768; } else if (pointerX > 32767) { pointerX = 32767; }
-    if (pointerY < -32768) { pointerY = -32768; } else if (pointerY > 32767) { pointerY = 32767; }
-
-    _touchPointerX = (int16_t)pointerX;
-    _touchPointerY = (int16_t)pointerY;
+    GSNDSScreenLayout layout = [GSNDSSupport shared].screenLayout;
+    CGPoint pointer = [GSNDSSupport pointerForNormalizedTouch: point layout: layout];
+    _touchPointerX = (int16_t)pointer.x;
+    _touchPointerY = (int16_t)pointer.y;
 }
 
 #pragma mark 画面
