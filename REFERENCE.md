@@ -69,8 +69,8 @@
 | **「游戏库」方块行**（URL 条目 + 模拟器 ROM 混排，一行横向滚动） | ✅ 已实现 | `HomeView.LibraryTileRow` + `LibraryItem.swift` |
 | **URL 条目导入本地图标**（「添加」里选图片，写入沙盒 `Documents/Icons/`） | ✅ 已实现 | `AddGameForm.swift` + `GSIconStore` |
 | **模拟器 ROM 自动抓取官方封面**（libretro-thumbnails `Named_Boxarts`，命中即缓存到 `Documents/Covers/`） | ⚠️ 待实机验证（联网抓取，本机无 iOS SDK，端到端未验证） | `GSCoverFetcher` + `AppState.refreshROMCovers` |
-| **设置页：三端键位**（触屏 / 键盘 / 手柄；改完即生效并持久化）；**三端都按系统分别配置** —— 先选系统，触屏调缩放 / 透明度 / 按键簇显隐，键盘 / 手柄各系统各绑一套 | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
-| **设置页：触屏布局编辑器**（**每个系统一套独立布局**；拖拽移动每一簇、双指或滑杆调整大小；入口**只在设置页**，游玩界面不可编辑） | ✅ 已实现 | `TouchLayoutEditor.swift` + `VirtualControls.swift` + `GSKeyMapping` |
+| **设置页：三端键位**（触屏 / 键盘 / 手柄；改完即生效并持久化）；**三端都按系统分别配置** —— 先选系统，触屏调缩放 / 透明度 / 各按键显隐，键盘 / 手柄各系统各绑一套 | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
+| **设置页：触屏布局编辑器**（**每个系统一套独立布局**；**每个按键各自独立**，逐个拖拽移动、双指或滑杆调整大小，可一键把某个大小应用到全部；入口**只在设置页**，游玩界面不可编辑） | ✅ 已实现 | `TouchLayoutEditor.swift` + `VirtualControls.swift` + `GSKeyMapping` |
 | 模拟器内三端按键转发（触屏虚拟手柄 + 硬件键盘 + 手柄 → 单一 `GSButton` 位掩码 → 核心） | ✅ 已实现 | `EmulatorInputCoordinator.swift` + `KeyboardCapture.swift` + `GSInputManager` |
 | 深链 `gameshell://home / open / play`（`search` 已移除，收到时提示） | ✅ 已实现 | `GSGameLauncher.m` + `GameshellApp.swift` + `AppState.handle(url:)` |
 | 自绘浮层（toast / confirm / 表单），**不使用系统弹窗** | ✅ 已实现 | `Sources/UI/Overlay/` |
@@ -89,7 +89,7 @@
 | **模拟器：声音输出**（交错 int16 直接进 `AVAudioSourceNode`，无格式转换） | ✅ 已实现（iOS） | `Sources/App/GSAudioPlayer.swift` |
 | **模拟器：变速**（顶栏档位按钮**循环 `0.5× / 1× / 2× / 4×`**；改的是宿主帧节奏 `frameIntervalNs = 1e9 / (fps × speed)`，核心每轮仍只跑一帧；速度夹紧在 0.25–4.0；**加速（>1×）时静音**） | ⚠️ 代码已写完、CI 编译链接通过，尚未实机实测 | `Sources/Core/GSEmulator.m` + `Sources/UI/Screens/EmulatorView.swift` |
 | **模拟器：即时存档（快照）**（顶栏「快照」→ 4 槽（带时间戳）存 / 读 / 删，外加**退出时自动写「自动存档」** `auto.state`，可在面板读回 / 删除；核心状态读写必须与 `runFrame` 同线程 → 走「主线程贴请求 → 模拟线程执行 → `dispatch_semaphore` 回传」+ `os_unfair_lock` 保护请求态，暂停时也可存 / 读档） | ⚠️ 代码已写完、CI 编译链接通过，尚未实机实测；**NDS 在 DSi 模式下核心不提供即时存档**（`retro_serialize_size()` 返回 0） | `Sources/Core/GSEmulator.h/.m` + 四个核心 glue（`GSMGBACore.m` / `GSNestopiaCore.mm` / `GSSnesCore.mm` / `GSMelonDSCore.mm`）+ `Sources/UI/Screens/EmulatorView.swift` |
-| **模拟器：自绘虚拟手柄**（**按键簇与默认布局按系统区分**：GB / GBC / NES 为十字键 + A / B + START / SELECT；GBA / SNES 加 L / R，SNES 为 A / B / X / Y 四键菱形；NDS 为四键菱形 + L / R + MENU + 下屏触摸区。每簇位置与大小由 `GSTouchClusterLayout` 归一化坐标决定，可在设置页调整） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSKeyMapping.m` |
+| **模拟器：自绘虚拟手柄**（**按键与默认布局按系统区分、每个按键各自独立**：GB / GBC / NES 为十字键 + A / B + START / SELECT；GBA / SNES 加 L / R，SNES 为 A / B / X / Y 四键菱形；NDS 为四键菱形 + L / R + MENU + 下屏触摸区。每个按键的位置与大小由 `GSTouchElementLayout` 归一化坐标决定，可在设置页逐个调整） | ✅ 已实现（iOS） | `Sources/UI/Emulator/VirtualControls.swift` + `Sources/Core/GSKeyMapping.m` |
 | **模拟器：ROM 并入游戏库**（统一方块行，卡片带系统徽标 / 封面）+ 设置页「核心接入状态表」 | ✅ 已实现（iOS） | `Sources/UI/Components/LibraryItem.swift` + `Sources/UI/Components/GameCard.swift` + `Sources/UI/Emulator/CoreStatusList.swift` |
 | **模拟器：JIT 能力探测**（真的去 `mmap(MAP_JIT)` 试探）+ TrollStore 探测 | ✅ 已实现 | `GSJIT`（`Sources/Core/GSEmulator.m`） |
 | **TrollStore 原生 JIT 自举**（带 `no-sandbox` 时，`__attribute__((constructor))` 抢在 `UIApplicationMain` 前 spawn 自身、子进程 `ptrace(PT_TRACE_ME)`，父子拿到 `CS_DEBUGGED` → `mmap(MAP_JIT)` 成立；照 Amethyst-iOS / UTM） | ⚠️ 代码已写完、CI 编译链接通过，**尚未实机验证**（本机无 iOS 工具链） | `Sources/Core/GSEmulator.m`（`GSJITBootstrapIfNeeded`） |

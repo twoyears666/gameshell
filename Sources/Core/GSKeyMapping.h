@@ -4,8 +4,8 @@
 //
 //  三端键位配置（触屏 / 键盘 / 手柄），**三端都按系统区分**。
 //
-//    · 触屏：虚拟手柄的整体缩放与透明度（全局），以及各按键簇是否显示、
-//      每一簇的位置与大小（按系统分别保存）；
+//    · 触屏：虚拟手柄的整体缩放与透明度（全局），以及各按键是否显示、
+//      每个按键各自的位置与大小（按系统分别保存；按键之间互不绑定）；
 //    · 键盘：UIKeyboardHIDUsage（HID 键码）→ GSButton（按系统分别保存）；
 //    · 手柄：GCController 的按钮字典键（"Button A" / "Direction Pad Up" …）→ GSButton（按系统分别保存）。
 //
@@ -25,23 +25,28 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// 触屏按键簇：设置页里可以单独调整每一簇的位置与大小。
-/// 前 5 个的 rawValue 保持不变（旧数据按 rawValue 迁移，不能错位）；
-/// Menu / TouchScreen 是后加的，追加在末尾。
-typedef NS_ENUM(NSInteger, GSTouchCluster) {
-    GSTouchClusterDPad = 0,     // 十字键
-    GSTouchClusterFace,         // A / B（SNES / NDS 上是 A / B / X / Y 四键）
-    GSTouchClusterL,            // L 肩键
-    GSTouchClusterR,            // R 肩键
-    GSTouchClusterStartSelect,  // START / SELECT
-    GSTouchClusterMenu,         // Menu（NDS：切换游戏内暂停菜单）
-    GSTouchClusterTouchScreen,  // 触摸屏（NDS 下屏）
+/// 触屏上可独立摆放的元素 —— **每个按键各自独立**调位置与大小，互不绑定。
+/// 十字键与 NDS 下屏触摸区是「整体元素」，不拆；
+/// 其余按键（A / B / X / Y / L / R / START / SELECT / MENU）各自一条，
+/// 不再有「A / B」「A / B / X / Y」「START / SELECT」这种成组的簇。
+typedef NS_ENUM(NSInteger, GSTouchElement) {
+    GSTouchElementDPad = 0,     // 十字键（整体，不拆四个方向）
+    GSTouchElementA,            // A 键
+    GSTouchElementB,            // B 键
+    GSTouchElementX,            // X 键（仅 SNES / NDS）
+    GSTouchElementY,            // Y 键（仅 SNES / NDS）
+    GSTouchElementL,            // L 肩键
+    GSTouchElementR,            // R 肩键
+    GSTouchElementStart,        // START
+    GSTouchElementSelect,       // SELECT
+    GSTouchElementMenu,         // Menu（NDS：切换游戏内暂停菜单）
+    GSTouchElementTouchScreen,  // 触摸屏（NDS 下屏，整体）
 };
 
-/// 单个按键簇的布局：归一化中心坐标（0–1，相对手柄可用区域）+ 相对默认尺寸的缩放。
+/// 单个元素的布局：归一化中心坐标（0–1，相对手柄可用区域）+ 相对默认尺寸的缩放。
 /// 用归一化坐标是为了让播放器与设置页的布局编辑器共用同一套数值，换屏幕尺寸也不会错位，
 /// 也方便以后做「材质包」时整套替换按键布局。
-@interface GSTouchClusterLayout : NSObject <NSCopying>
+@interface GSTouchElementLayout : NSObject <NSCopying>
 
 /// 中心点横坐标（0 = 最左，1 = 最右）
 @property (nonatomic, assign) CGFloat x;
@@ -65,28 +70,28 @@ typedef NS_ENUM(NSInteger, GSTouchCluster) {
 /// 虚拟手柄整体透明度（0.3 – 1.0，默认 0.92）
 @property (nonatomic, assign) CGFloat touchOpacity;
 
-#pragma mark - 触屏按键簇（按系统区分）
+#pragma mark - 触屏元素（按系统区分）
 
-/// 某系统该有哪些按键簇（设置页遍历、播放器渲染都用它）。
+/// 某系统该有哪些触屏元素（设置页遍历、播放器渲染都用它）。
 /// systemIdentifier 取 GSSystemInfo.identifier（"nes" / "snes" / "gb" / "gbc" / "gba" / "nds"）。
-+ (NSArray<NSNumber *> *)touchClustersForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(touchClusters(forSystem:));
-/// 该系统的 A / B 簇是否要画成 A / B / X / Y 四键（SNES / NDS 为 YES）
-+ (BOOL)systemUsesFourFaceKeys:(NSString *)systemIdentifier NS_SWIFT_NAME(systemUsesFourFaceKeys(_:));
-/// 按键簇在某系统里的展示名（"十字键" / "A / B" / "A / B / X / Y" / "Menu" / "触摸屏" …）
-+ (NSString *)displayNameForCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(displayName(forCluster:system:));
++ (NSArray<NSNumber *> *)touchElementsForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(touchElements(forSystem:));
+/// 触屏元素在某系统里的展示名（"十字键" / "A 键" / "START" / "Menu" / "触摸屏" …）
++ (NSString *)displayNameForElement:(GSTouchElement)element NS_SWIFT_NAME(displayName(forElement:));
 
-/// 某系统里某簇当前布局；用户没自定义过时就是该系统的内置默认值（永远非空）
-- (GSTouchClusterLayout *)layoutForCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(layout(for:system:));
-/// 写入某系统里某簇的布局：只改内存，不落盘；需要落盘请显式调用 -persist（拖拽过程中每帧都写盘太重）
-- (void)setLayout:(GSTouchClusterLayout *)layout forCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(setLayout(_:for:system:));
+/// 某系统里某元素当前布局；用户没自定义过时就是该系统的内置默认值（永远非空）
+- (GSTouchElementLayout *)layoutForElement:(GSTouchElement)element forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(layout(for:system:));
+/// 写入某系统里某元素的布局：只改内存，不落盘；需要落盘请显式调用 -persist（拖拽过程中每帧都写盘太重）
+- (void)setLayout:(GSTouchElementLayout *)layout forElement:(GSTouchElement)element forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(setLayout(_:for:system:));
+/// 把某个大小（缩放）一次性应用到该系统的所有按键（触摸屏是屏、不是按键，不动它），并落盘
+- (void)applyScale:(CGFloat)scale toAllElementsForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(applyScale(_:toAllElementsForSystem:));
 /// 该系统有没有被用户改过布局（设置页显示「已自定义」用）
 - (BOOL)hasCustomTouchLayoutForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(hasCustomTouchLayout(forSystem:));
-/// 把某系统的按键簇布局与可见性恢复成内置默认（并落盘）
+/// 把某系统的元素布局与可见性恢复成内置默认（并落盘）
 - (void)resetTouchLayoutsForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(resetTouchLayouts(forSystem:));
 
-/// 某系统里某簇当前是否显示（没被显式改过时，属于该系统按键簇集合的默认显示）
-- (BOOL)isClusterVisible:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(isClusterVisible(_:forSystem:));
-- (void)setVisible:(BOOL)visible forCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(setVisible(_:forCluster:system:));
+/// 某系统里某元素当前是否显示（没被显式改过时，属于该系统元素集合的默认显示）
+- (BOOL)isElementVisible:(GSTouchElement)element forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(isElementVisible(_:forSystem:));
+- (void)setVisible:(BOOL)visible forElement:(GSTouchElement)element forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(setVisible(_:forElement:system:));
 
 #pragma mark - 键盘（usage = UIKeyboardHIDUsage 的 rawValue；按系统分桶）
 

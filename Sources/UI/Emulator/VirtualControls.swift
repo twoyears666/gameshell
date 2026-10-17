@@ -12,9 +12,10 @@
 //    · 顶部 L / R 肩键（8 位机没有）
 //    · NDS 额外：Menu（切换暂停菜单）+ 触摸屏（下屏）
 //
-//  显示哪些簇、各簇默认位置与大小都**按系统区分**，来自 GSKeyMapping 的
-//  touchClustersForSystem: / layoutForCluster:forSystem:；
-//  设置页里的「布局编辑器」可以拖拽调整，游玩界面里不可编辑。
+//  显示哪些按键、每个按键各自的位置与大小都**按系统区分**，来自 GSKeyMapping 的
+//  touchElementsForSystem: / layoutForElement:forSystem:；
+//  每个按键（A / B / X / Y / L / R / START / SELECT / MENU）都是**独立元素**，互不绑定；
+//  设置页里的「布局编辑器」可以逐个拖拽调整，游玩界面里不可编辑。
 //  按键状态合并成一个 GSButton 位掩码交给上层，最终进 GSEmulatorSession.setButtonMask(_:)；
 //  触摸屏另走 onTouch 归一化坐标，Menu 走 onMenu 回调。
 //
@@ -30,15 +31,13 @@ import SwiftUI
 struct GamepadMetrics {
     let area: CGSize
 
-    /// 十字键的边长（不含簇缩放）
+    /// 十字键的边长（不含单元素缩放）
     var dpadSize: CGFloat { min(area.height * 0.86, max(96, min(area.width * 0.32, 168))) }
     var faceDiameter: CGFloat { dpadSize * 0.36 }
-    var faceClusterSize: CGFloat { faceDiameter * 2.6 }
     var shoulderWidth: CGFloat { max(64, min(area.width * 0.19, 150)) }
     var shoulderHeight: CGFloat { max(30, min(area.height * 0.16, 44)) }
     var pillWidth: CGFloat { max(58, min(area.width * 0.16, 116)) }
     var pillHeight: CGFloat { max(28, min(area.height * 0.13, 38)) }
-    var pillSpacing: CGFloat { max(8, pillWidth * 0.14) }
     /// Menu 是单个胶囊按键
     var menuWidth: CGFloat { pillWidth }
     var menuHeight: CGFloat { pillHeight }
@@ -46,42 +45,43 @@ struct GamepadMetrics {
     var touchScreenWidth: CGFloat { max(120, min(area.width * 0.34, 240)) }
     var touchScreenHeight: CGFloat { touchScreenWidth * 0.75 }
 
-    /// 某簇在给定布局下的包围盒尺寸（布局编辑器用它决定拖拽热区）
-    func box(for cluster: GSTouchCluster, clusterLayout: GSTouchClusterLayout) -> CGSize {
-        let scale = clusterLayout.scale
-        switch cluster {
+    /// 某元素在给定布局下的尺寸 —— **每个按键各自一套**，播放器与编辑器共用（编辑器用它决定拖拽热区）
+    func box(for element: GSTouchElement, layout: GSTouchElementLayout) -> CGSize {
+        let scale = layout.scale
+        switch element {
         case .dPad:
             return CGSize(width: dpadSize * scale, height: dpadSize * scale)
-        case .face:
-            return CGSize(width: faceClusterSize * scale, height: faceClusterSize * scale)
+        case .A, .B, .X, .Y:
+            return CGSize(width: faceDiameter * scale, height: faceDiameter * scale)
         case .L, .R:
             return CGSize(width: shoulderWidth * scale, height: shoulderHeight * scale)
-        case .startSelect:
-            return CGSize(width: (pillWidth * 2 + pillSpacing) * scale, height: pillHeight * scale)
+        case .start, .select:
+            return CGSize(width: pillWidth * scale, height: pillHeight * scale)
         case .menu:
             return CGSize(width: menuWidth * scale, height: menuHeight * scale)
         case .touchScreen:
             return CGSize(width: touchScreenWidth * scale, height: touchScreenHeight * scale)
         default:
-            return CGSize(width: 48, height: 48)
+            return CGSize(width: faceDiameter * scale, height: faceDiameter * scale)
         }
     }
 }
 
 // MARK: - 虚拟手柄
 
-/// 虚拟手柄整体：按归一化布局自适应摆放各按键簇。显示的簇与默认布局都按系统区分。
+/// 虚拟手柄整体：按归一化布局自适应摆放每个按键。显示的按键与默认布局都按系统区分。
+/// **每个按键都是独立元素**，各自有自己的位置与大小，互不绑定。
 struct VirtualGamepad: View {
 
     /// 手柄可用的区域尺寸（横屏=整屏，竖屏=画面下方的操作区）
     let size: CGSize
-    /// 三端键位配置：决定整体缩放 / 透明度 / 各按键簇是否显示，以及每簇的位置与大小
+    /// 三端键位配置：决定整体缩放 / 透明度 / 各按键是否显示，以及每个按键的位置与大小
     let mapping: GSKeyMapping
-    /// 当前系统标识（nes / snes / gb / gbc / gba / nds），决定按键簇集合与四键形态
+    /// 当前系统标识（nes / snes / gb / gbc / gba / nds），决定按键集合
     var systemIdentifier: String = ""
     /// 位掩码变化回调（按下/抬起都会回传一次完整掩码）
     var onMaskChange: (GSButton) -> Void
-    /// 触摸屏簇拖动：归一化坐标（0–1，相对触摸区）+ 是否按下
+    /// 触摸屏拖动：归一化坐标（0–1，相对触摸区）+ 是否按下
     var onTouch: (CGPoint, Bool) -> Void = { _, _ in }
     /// Menu 键按下（切换游戏内暂停菜单；不参与位掩码）
     var onMenu: () -> Void = {}
@@ -100,26 +100,26 @@ struct VirtualGamepad: View {
     /// 整体透明度：0.3 – 1.0
     private var opacity: Double { Double(max(0.3, min(1.0, mapping.touchOpacity))) }
 
-    /// 当前系统有哪些按键簇
-    private var clusters: [GSTouchCluster] {
-        GSKeyMapping.touchClusters(forSystem: systemIdentifier)
-            .compactMap { GSTouchCluster(rawValue: $0.intValue) }
+    /// 当前系统有哪些按键元素
+    private var elements: [GSTouchElement] {
+        GSKeyMapping.touchElements(forSystem: systemIdentifier)
+            .compactMap { GSTouchElement(rawValue: $0.intValue) }
     }
 
-    /// 该簇在本系统里既存在、又处于显示状态
-    private func shows(_ cluster: GSTouchCluster) -> Bool {
-        clusters.contains(cluster) && mapping.isClusterVisible(cluster, forSystem: systemIdentifier)
+    /// 该元素在本系统里既存在、又处于显示状态
+    private func shows(_ element: GSTouchElement) -> Bool {
+        elements.contains(element) && mapping.isElementVisible(element, forSystem: systemIdentifier)
     }
 
-    /// 某簇的布局（归一化中心 + 缩放）
-    private func layout(_ cluster: GSTouchCluster) -> GSTouchClusterLayout {
-        mapping.layout(for: cluster, system: systemIdentifier)
+    /// 某元素的布局（归一化中心 + 缩放）
+    private func layout(_ element: GSTouchElement) -> GSTouchElementLayout {
+        mapping.layout(for: element, system: systemIdentifier)
     }
 
-    /// 某簇的中心点（像素）
-    private func center(_ cluster: GSTouchCluster) -> CGPoint {
-        let clusterLayout = layout(cluster)
-        return CGPoint(x: clusterLayout.x * size.width, y: clusterLayout.y * size.height)
+    /// 某元素的中心点（像素）
+    private func center(_ element: GSTouchElement) -> CGPoint {
+        let elementLayout = layout(element)
+        return CGPoint(x: elementLayout.x * size.width, y: elementLayout.y * size.height)
     }
 
     var body: some View {
@@ -127,10 +127,14 @@ struct VirtualGamepad: View {
             SwiftUI.Color.clear
 
             if shows(.dPad) { dpadNode }
-            if shows(.face) { faceNode }
-            if shows(.L) { shoulderNode(.L) }
-            if shows(.R) { shoulderNode(.R) }
-            if shows(.startSelect) { startSelectNode }
+            if shows(.A) { keyNode(.A) }
+            if shows(.B) { keyNode(.B) }
+            if shows(.X) { keyNode(.X) }
+            if shows(.Y) { keyNode(.Y) }
+            if shows(.L) { keyNode(.L) }
+            if shows(.R) { keyNode(.R) }
+            if shows(.select) { keyNode(.select) }
+            if shows(.start) { keyNode(.start) }
             if shows(.menu) { menuNode }
             if shows(.touchScreen) { touchScreenNode }
         }
@@ -140,24 +144,28 @@ struct VirtualGamepad: View {
         .opacity(opacity)
     }
 
-    // MARK: - 各按键簇
+    // MARK: - 各按键
 
-    /// 左：十字键
+    /// 左：十字键（整体元素，不拆四个方向）
     private var dpadNode: some View {
-        let clusterLayout = layout(.dPad)
-        return DPadControl(size: metrics.dpadSize * clusterLayout.scale) { mask in
+        let elementLayout = layout(.dPad)
+        return DPadControl(size: metrics.dpadSize * elementLayout.scale) { mask in
             dpadMask = mask
             onMaskChange(combinedMask)
         }
         .position(center(.dPad))
     }
 
-    /// 右：A / B（四键系统上是 A / B / X / Y 菱形）
-    private var faceNode: some View {
-        let clusterLayout = layout(.face)
-        return GamepadFaceCluster(diameter: metrics.faceDiameter * clusterLayout.scale,
-                                  hasFourFaceKeys: GSKeyMapping.systemUsesFourFaceKeys(systemIdentifier),
-                                  held: held) { bit, down in
+    /// 面键 / 肩键 / START / SELECT：每个按键各自一个独立按钮
+    private func keyNode(_ element: GSTouchElement) -> some View {
+        let elementLayout = layout(element)
+        let box = metrics.box(for: element, layout: elementLayout)
+        let bit = Self.button(for: element)
+        return GamepadKey(label: Self.label(for: element),
+                          width: box.width,
+                          height: box.height,
+                          fontSize: Self.fontSize(for: element, metrics: metrics, scale: elementLayout.scale),
+                          isHighlighted: held.contains(bit)) { down in
             if down {
                 held.formUnion(bit)
             } else {
@@ -165,129 +173,69 @@ struct VirtualGamepad: View {
             }
             onMaskChange(combinedMask)
         }
-        .position(center(.face))
-    }
-
-    /// 顶部两角：L 或 R（8 位机没有这个簇）
-    private func shoulderNode(_ cluster: GSTouchCluster) -> some View {
-        let clusterLayout = layout(cluster)
-        let isLeft = (cluster == .L)
-        return key(label: isLeft ? "L" : "R",
-                   bit: isLeft ? .L : .R,
-                   width: metrics.shoulderWidth * clusterLayout.scale,
-                   height: metrics.shoulderHeight * clusterLayout.scale,
-                   fontSize: 14 * clusterLayout.scale)
-            .position(center(cluster))
-    }
-
-    /// 底部中间：START / SELECT
-    private var startSelectNode: some View {
-        let clusterLayout = layout(.startSelect)
-        return HStack(spacing: metrics.pillSpacing * clusterLayout.scale) {
-            key(label: "SELECT", bit: .select,
-                width: metrics.pillWidth * clusterLayout.scale,
-                height: metrics.pillHeight * clusterLayout.scale,
-                fontSize: 11 * clusterLayout.scale)
-            key(label: "START", bit: .start,
-                width: metrics.pillWidth * clusterLayout.scale,
-                height: metrics.pillHeight * clusterLayout.scale,
-                fontSize: 11 * clusterLayout.scale)
-        }
-        .position(center(.startSelect))
+        .position(center(element))
     }
 
     /// NDS：Menu 键（等价顶栏的暂停，切换游戏内暂停菜单）
     private var menuNode: some View {
-        let clusterLayout = layout(.menu)
+        let elementLayout = layout(.menu)
         return GamepadKey(label: "MENU",
-                          width: metrics.menuWidth * clusterLayout.scale,
-                          height: metrics.menuHeight * clusterLayout.scale,
-                          fontSize: 11 * clusterLayout.scale,
+                          width: metrics.menuWidth * elementLayout.scale,
+                          height: metrics.menuHeight * elementLayout.scale,
+                          fontSize: 11 * elementLayout.scale,
                           isHighlighted: false) { down in
             if down { onMenu() }
         }
         .position(center(.menu))
     }
 
-    /// NDS：触摸屏（下屏触摸区）
+    /// NDS：触摸屏（下屏触摸区，整体元素）
     private var touchScreenNode: some View {
-        let clusterLayout = layout(.touchScreen)
-        return GamepadTouchScreen(size: CGSize(width: metrics.touchScreenWidth * clusterLayout.scale,
-                                               height: metrics.touchScreenHeight * clusterLayout.scale),
+        let elementLayout = layout(.touchScreen)
+        return GamepadTouchScreen(size: CGSize(width: metrics.touchScreenWidth * elementLayout.scale,
+                                               height: metrics.touchScreenHeight * elementLayout.scale),
                                   onTouch: onTouch)
             .position(center(.touchScreen))
     }
 
-    private func key(label: String,
-                     bit: GSButton,
-                     width: CGFloat,
-                     height: CGFloat,
-                     fontSize: CGFloat) -> some View {
-        GamepadKey(label: label,
-                   width: width,
-                   height: height,
-                   fontSize: fontSize,
-                   isHighlighted: held.contains(bit)) { down in
-            if down {
-                held.formUnion(bit)
-            } else {
-                held.remove(bit)
-            }
-            onMaskChange(combinedMask)
+    /// 元素 → GSButton 位（A/B/X/Y/L/R/START/SELECT；Menu / 触摸屏不参与位掩码，返回空集）
+    private static func button(for element: GSTouchElement) -> GSButton {
+        switch element {
+        case .A:      return .A
+        case .B:      return .B
+        case .X:      return .X
+        case .Y:      return .Y
+        case .L:      return .L
+        case .R:      return .R
+        case .start:  return .start
+        case .select: return .select
+        default:      return []
         }
     }
-}
 
-// MARK: - A / B（或 A / B / X / Y）簇
-
-/// 面键簇。两键时是「左下 B、右上 A」的斜向排布（照 Delta GBA）；
-/// 四键时是 A/B/X/Y 菱形（SNES / NDS）。播放器与布局编辑器共用同一份外观。
-struct GamepadFaceCluster: View {
-    let diameter: CGFloat
-    /// 是否画成 A / B / X / Y 四键（SNES / NDS 为 true）
-    var hasFourFaceKeys: Bool = false
-    /// 当前按下的位掩码（高亮用）
-    var held: GSButton = []
-    /// 是否响应触摸（布局编辑器里传 false，只当作可拖拽的图形）
-    var interactive: Bool = true
-    var onPress: (GSButton, Bool) -> Void = { _, _ in }
-
-    private var clusterSize: CGFloat { diameter * 2.6 }
-
-    var body: some View {
-        ZStack {
-            if hasFourFaceKeys {
-                // 菱形：X 上 / A 右 / B 下 / Y 左
-                faceKey(.X, offset: CGPoint(x: 0, y: -diameter * 0.46))
-                faceKey(.A, offset: CGPoint(x: diameter * 0.46, y: 0))
-                faceKey(.B, offset: CGPoint(x: 0, y: diameter * 0.46))
-                faceKey(.Y, offset: CGPoint(x: -diameter * 0.46, y: 0))
-            } else {
-                faceKey(.B, offset: CGPoint(x: -diameter * 0.40, y: diameter * 0.40))
-                faceKey(.A, offset: CGPoint(x: diameter * 0.46, y: -diameter * 0.30))
-            }
+    /// 元素 → 按键上的文字
+    private static func label(for element: GSTouchElement) -> String {
+        switch element {
+        case .A:      return "A"
+        case .B:      return "B"
+        case .X:      return "X"
+        case .Y:      return "Y"
+        case .L:      return "L"
+        case .R:      return "R"
+        case .start:  return "START"
+        case .select: return "SELECT"
+        default:      return ""
         }
-        .frame(width: clusterSize, height: clusterSize)
     }
 
-    private func faceKey(_ bit: GSButton, offset: CGPoint) -> some View {
-        GamepadKey(label: Self.label(for: bit),
-                   width: diameter,
-                   height: diameter,
-                   fontSize: diameter * 0.36,
-                   isHighlighted: held.contains(bit),
-                   interactive: interactive) { down in
-            onPress(bit, down)
+    /// 元素 → 字号（跟各自的基础尺寸一起缩放）
+    private static func fontSize(for element: GSTouchElement, metrics: GamepadMetrics, scale: CGFloat) -> CGFloat {
+        switch element {
+        case .A, .B, .X, .Y:         return metrics.faceDiameter * scale * 0.36
+        case .L, .R:                 return 14 * scale
+        case .start, .select, .menu: return 11 * scale
+        default:                     return 12 * scale
         }
-        .offset(x: offset.x, y: offset.y)
-    }
-
-    private static func label(for bit: GSButton) -> String {
-        if bit == .A { return "A" }
-        if bit == .B { return "B" }
-        if bit == .X { return "X" }
-        if bit == .Y { return "Y" }
-        return "?"
     }
 }
 

@@ -421,15 +421,15 @@ private struct TouchSettingsCard: View {
         GSSystemRegistry.integratedSystems()
     }
 
-    /// 当前系统有哪些按键簇
-    private var clusters: [GSTouchCluster] {
-        GSKeyMapping.touchClusters(forSystem: systemIdentifier)
-            .compactMap { GSTouchCluster(rawValue: $0.intValue) }
+    /// 当前系统有哪些按键元素
+    private var elements: [GSTouchElement] {
+        GSKeyMapping.touchElements(forSystem: systemIdentifier)
+            .compactMap { GSTouchElement(rawValue: $0.intValue) }
     }
 
     var body: some View {
         SettingsCard(title: "触屏手柄",
-                     subtitle: "缩放、透明度是全局的；各按键簇是否显示、位置与大小按系统分别保存") {
+                     subtitle: "缩放、透明度是全局的；每个按键是否显示、位置与大小按系统分别保存（按键之间互不绑定）") {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 SystemPickerBar(systems: systems, selection: $systemIdentifier)
 
@@ -447,12 +447,12 @@ private struct TouchSettingsCard: View {
                     mapping.touchOpacity = value
                 }
 
-                ForEach(clusters, id: \.rawValue) { cluster in
-                    toggle(title: "显示 \(GSKeyMapping.displayName(forCluster: cluster, system: systemIdentifier))",
-                           isOn: visibleBinding(cluster))
+                ForEach(elements, id: \.rawValue) { element in
+                    toggle(title: "显示 \(GSKeyMapping.displayName(forElement: element))",
+                           isOn: visibleBinding(element))
                 }
 
-                // 每簇的位置与大小（拖拽移动、双指或滑杆缩放）只在设置页的布局编辑器里调
+                // 每个按键的位置与大小（拖拽移动、双指或滑杆缩放）只在设置页的布局编辑器里调
                 PillButton(title: "编辑布局（拖动位置 / 调整大小）", style: .secondary) {
                     onEditLayout(systemIdentifier)
                 }
@@ -461,12 +461,12 @@ private struct TouchSettingsCard: View {
         }
     }
 
-    /// 某簇的显示开关绑定：直接读写 GSKeyMapping（按系统），改完立即落盘
-    private func visibleBinding(_ cluster: GSTouchCluster) -> Binding<Bool> {
+    /// 某按键的显示开关绑定：直接读写 GSKeyMapping（按系统），改完立即落盘
+    private func visibleBinding(_ element: GSTouchElement) -> Binding<Bool> {
         Binding(
-            get: { mapping.isClusterVisible(cluster, forSystem: systemIdentifier) },
+            get: { mapping.isElementVisible(element, forSystem: systemIdentifier) },
             set: { newValue in
-                mapping.setVisible(newValue, forCluster: cluster, system: systemIdentifier)
+                mapping.setVisible(newValue, forElement: element, system: systemIdentifier)
                 mapping.persist()
             }
         )

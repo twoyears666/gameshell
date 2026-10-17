@@ -2,11 +2,12 @@
 //  TouchLayoutEditor.swift
 //  Gameshell
 //
-//  触屏手柄的「布局编辑器」：拖拽移动每一簇按键、双指或滑杆调整大小。
+//  触屏手柄的「布局编辑器」：逐个拖拽移动每个按键、双指或滑杆调整大小。
 //
 //  入口只在设置页里（触摸卡片上的「编辑布局」），游玩界面（EmulatorView）不提供编辑入口，
 //  避免玩到一半误触把布局拖乱。编辑的是**当前所选系统**的布局（各系统分开保存）。
-//  改完立即写回 GSKeyMapping 内存，松手时落盘到 Documents/keymap.json。
+//  每个按键（A / B / X / Y / L / R / START / SELECT / MENU）都是**独立元素**，互不绑定；
+//  十字键与 NDS 下屏触摸区是整体元素。改完立即写回 GSKeyMapping 内存，松手时落盘到 keymap.json。
 //  坐标是归一化的（相对手柄可用区域），所以横竖屏各自按自己的区域生效。
 //
 
@@ -22,15 +23,15 @@ struct TouchLayoutEditor: View {
     let onClose: () -> Void
 
     /// 编辑器内自己持一份布局，拖拽时即时重绘；松手 / 松滑杆时落盘。
-    @State private var layouts: [Int: GSTouchClusterLayout] = [:]
-    @State private var selected: GSTouchCluster = .dPad
+    @State private var layouts: [Int: GSTouchElementLayout] = [:]
+    @State private var selected: GSTouchElement = .dPad
     /// 一次拖拽 / 缩放的起点（手势过程中不变，避免累积误差）
-    @State private var gestureOrigin: GSTouchClusterLayout?
+    @State private var gestureOrigin: GSTouchElementLayout?
 
-    /// 该系统的按键簇集合
-    private var clusters: [GSTouchCluster] {
-        GSKeyMapping.touchClusters(forSystem: systemIdentifier)
-            .compactMap { GSTouchCluster(rawValue: $0.intValue) }
+    /// 该系统的按键元素集合
+    private var elements: [GSTouchElement] {
+        GSKeyMapping.touchElements(forSystem: systemIdentifier)
+            .compactMap { GSTouchElement(rawValue: $0.intValue) }
     }
 
     var body: some View {
@@ -41,10 +42,10 @@ struct TouchLayoutEditor: View {
                 let canvas = proxy.size
                 ZStack(alignment: .topLeading) {
                     canvasBackground
-                    ForEach(clusters.indices, id: \.self) { index in
-                        let cluster = clusters[index]
-                        if isVisible(cluster) {
-                            clusterNode(cluster, canvas: canvas)
+                    ForEach(elements.indices, id: \.self) { index in
+                        let element = elements[index]
+                        if isVisible(element) {
+                            elementNode(element, canvas: canvas)
                         }
                     }
                 }
@@ -69,7 +70,7 @@ struct TouchLayoutEditor: View {
                 Text("触屏布局 · \(systemTitle)")
                     .font(Theme.Font.cardTitle)
                     .foregroundStyle(Theme.Color.textPrimary)
-                Text("拖动移动 · 双指或滑杆调大小")
+                Text("每个按键各自拖动 · 双指或滑杆调大小")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.Color.textSecondary)
                     .lineLimit(1)
@@ -105,13 +106,13 @@ struct TouchLayoutEditor: View {
             .padding(Theme.Spacing.sm)
     }
 
-    private func clusterNode(_ cluster: GSTouchCluster, canvas: CGSize) -> some View {
+    private func elementNode(_ element: GSTouchElement, canvas: CGSize) -> some View {
         let metrics = GamepadMetrics(area: canvas)
-        let clusterLayout = layout(cluster)
-        let box = metrics.box(for: cluster, clusterLayout: clusterLayout)
-        let isSelected = selected == cluster
+        let elementLayout = layout(element)
+        let box = metrics.box(for: element, layout: elementLayout)
+        let isSelected = selected == element
 
-        return clusterContent(cluster, metrics: metrics, clusterLayout: clusterLayout)
+        return elementContent(element, metrics: metrics)
             .frame(width: box.width, height: box.height)
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
@@ -119,95 +120,78 @@ struct TouchLayoutEditor: View {
                             style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
             )
             .contentShape(Rectangle())
-            .gesture(dragGesture(cluster, canvas: canvas))
-            .simultaneousGesture(magnifyGesture(cluster))
-            .position(x: clusterLayout.x * canvas.width, y: clusterLayout.y * canvas.height)
+            // 关键：先摆位置（.position），再挂手势。
+            // 若把 .position 放在 .gesture 之后，命中区会停在旧位置、与画出来的位置错位，于是「拖不动」。
+            .position(x: elementLayout.x * canvas.width, y: elementLayout.y * canvas.height)
+            .gesture(dragGesture(element, canvas: canvas))
+            .simultaneousGesture(magnifyGesture(element))
     }
 
     @ViewBuilder
-    private func clusterContent(_ cluster: GSTouchCluster,
-                                metrics: GamepadMetrics,
-                                clusterLayout: GSTouchClusterLayout) -> some View {
-        switch cluster {
+    private func elementContent(_ element: GSTouchElement, metrics: GamepadMetrics) -> some View {
+        let elementLayout = layout(element)
+        switch element {
         case .dPad:
-            DPadControl(size: metrics.dpadSize * clusterLayout.scale, interactive: false) { _ in }
-        case .face:
-            GamepadFaceCluster(diameter: metrics.faceDiameter * clusterLayout.scale,
-                               hasFourFaceKeys: GSKeyMapping.systemUsesFourFaceKeys(systemIdentifier),
-                               interactive: false)
-        case .L, .R:
-            GamepadKey(label: cluster == .L ? "L" : "R",
-                       width: metrics.shoulderWidth * clusterLayout.scale,
-                       height: metrics.shoulderHeight * clusterLayout.scale,
-                       fontSize: 14 * clusterLayout.scale,
-                       isHighlighted: false,
-                       interactive: false)
-        case .startSelect:
-            HStack(spacing: metrics.pillSpacing * clusterLayout.scale) {
-                GamepadKey(label: "SELECT",
-                           width: metrics.pillWidth * clusterLayout.scale,
-                           height: metrics.pillHeight * clusterLayout.scale,
-                           fontSize: 11 * clusterLayout.scale,
-                           isHighlighted: false,
-                           interactive: false)
-                GamepadKey(label: "START",
-                           width: metrics.pillWidth * clusterLayout.scale,
-                           height: metrics.pillHeight * clusterLayout.scale,
-                           fontSize: 11 * clusterLayout.scale,
-                           isHighlighted: false,
-                           interactive: false)
-            }
-        case .menu:
-            GamepadKey(label: "MENU",
-                       width: metrics.menuWidth * clusterLayout.scale,
-                       height: metrics.menuHeight * clusterLayout.scale,
-                       fontSize: 11 * clusterLayout.scale,
-                       isHighlighted: false,
-                       interactive: false)
+            DPadControl(size: metrics.dpadSize * elementLayout.scale, interactive: false) { _ in }
         case .touchScreen:
-            GamepadTouchScreen(size: CGSize(width: metrics.touchScreenWidth * clusterLayout.scale,
-                                            height: metrics.touchScreenHeight * clusterLayout.scale),
+            GamepadTouchScreen(size: CGSize(width: metrics.touchScreenWidth * elementLayout.scale,
+                                            height: metrics.touchScreenHeight * elementLayout.scale),
                                interactive: false)
+        case .A, .B, .X, .Y, .L, .R, .start, .select, .menu:
+            keyView(element, metrics: metrics, elementLayout: elementLayout)
         default:
             EmptyView()
         }
     }
 
+    private func keyView(_ element: GSTouchElement,
+                         metrics: GamepadMetrics,
+                         elementLayout: GSTouchElementLayout) -> some View {
+        let box = metrics.box(for: element, layout: elementLayout)
+        return GamepadKey(label: Self.label(for: element),
+                          width: box.width,
+                          height: box.height,
+                          fontSize: Self.fontSize(for: element, metrics: metrics, scale: elementLayout.scale),
+                          isHighlighted: false,
+                          interactive: false)
+    }
+
     // MARK: - 手势
 
-    private func dragGesture(_ cluster: GSTouchCluster, canvas: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 1)
+    private func dragGesture(_ element: GSTouchElement, canvas: CGSize) -> some Gesture {
+        // 用全局坐标系：视图自身在拖动过程中会移动，用 .local 会把位移算歪、抖成鬼畜。
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
             .onChanged { value in
-                selected = cluster
-                let origin = gestureOrigin ?? layout(cluster)
+                selected = element
+                let origin = gestureOrigin ?? layout(element)
                 if gestureOrigin == nil { gestureOrigin = origin }
                 guard canvas.width > 0, canvas.height > 0 else { return }
-                apply(GSTouchClusterLayout.make(
+                apply(GSTouchElementLayout.make(
                     x: clamp01(origin.x + value.translation.width / canvas.width),
                     y: clamp01(origin.y + value.translation.height / canvas.height),
-                    scale: origin.scale), to: cluster)
+                    scale: origin.scale), to: element)
             }
             .onEnded { _ in commit() }
     }
 
-    private func magnifyGesture(_ cluster: GSTouchCluster) -> some Gesture {
+    private func magnifyGesture(_ element: GSTouchElement) -> some Gesture {
         MagnificationGesture()
             .onChanged { factor in
-                selected = cluster
-                let origin = gestureOrigin ?? layout(cluster)
+                selected = element
+                let origin = gestureOrigin ?? layout(element)
                 if gestureOrigin == nil { gestureOrigin = origin }
-                apply(GSTouchClusterLayout.make(
+                apply(GSTouchElementLayout.make(
                     x: origin.x,
                     y: origin.y,
-                    scale: clampScale(origin.scale * factor)), to: cluster)
+                    scale: clampScale(origin.scale * factor)), to: element)
             }
             .onEnded { _ in commit() }
     }
 
-    private func apply(_ clusterLayout: GSTouchClusterLayout, to cluster: GSTouchCluster) {
-        layouts[cluster.rawValue] = clusterLayout
+    private func apply(_ elementLayout: GSTouchElementLayout, to element: GSTouchElement) {
+        layouts[element.rawValue] = elementLayout
         // 只改内存，避免拖拽过程中每帧都写 JSON；落盘在 commit()
-        mapping.setLayout(clusterLayout, for: cluster, system: systemIdentifier)
+        mapping.setLayout(elementLayout, for: element, system: systemIdentifier)
     }
 
     private func commit() {
@@ -219,9 +203,9 @@ struct TouchLayoutEditor: View {
 
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            clusterChips
+            elementChips
             sizeSlider
-            Text("每个系统各存一套：「\(systemTitle)」的布局只对它自己生效，改别的系统不会串。坐标按手柄可用区域归一化：横屏用整屏，竖屏用画面下方的操作区。")
+            Text("每个按键都是独立的：位置与大小各自一套，改这个不会动到别的按键。屏幕坐标按手柄可用区域归一化：横屏用整屏，竖屏用画面下方的操作区。布局只对「\(systemTitle)」生效。")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.Color.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -235,22 +219,22 @@ struct TouchLayoutEditor: View {
         }
     }
 
-    private var clusterChips: some View {
+    private var elementChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Spacing.xs) {
-                ForEach(clusters.indices, id: \.self) { index in
-                    let cluster = clusters[index]
+                ForEach(elements.indices, id: \.self) { index in
+                    let element = elements[index]
                     Button {
-                        selected = cluster
+                        selected = element
                     } label: {
-                        Text(chipTitle(cluster))
+                        Text(chipTitle(element))
                             .font(Theme.Font.chip)
-                            .foregroundStyle(selected == cluster ? Theme.Color.background : Theme.Color.textPrimary)
+                            .foregroundStyle(selected == element ? Theme.Color.background : Theme.Color.textPrimary)
                             .padding(.horizontal, Theme.Spacing.sm)
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
-                                    .fill(selected == cluster ? Theme.Color.accent : Theme.Color.surface)
+                                    .fill(selected == element ? Theme.Color.accent : Theme.Color.surface)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
                                             .stroke(Theme.Color.border, lineWidth: 1)
@@ -263,15 +247,15 @@ struct TouchLayoutEditor: View {
         }
     }
 
-    private func chipTitle(_ cluster: GSTouchCluster) -> String {
-        let name = GSKeyMapping.displayName(forCluster: cluster, system: systemIdentifier)
-        return isVisible(cluster) ? name : "\(name)（已隐藏）"
+    private func chipTitle(_ element: GSTouchElement) -> String {
+        let name = GSKeyMapping.displayName(forElement: element)
+        return isVisible(element) ? name : "\(name)（已隐藏）"
     }
 
     private var sizeSlider: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("「\(GSKeyMapping.displayName(forCluster: selected, system: systemIdentifier))」大小")
+                Text("「\(GSKeyMapping.displayName(forElement: selected))」大小")
                     .font(Theme.Font.chip)
                     .foregroundStyle(Theme.Color.textSecondary)
                 Spacer(minLength: 0)
@@ -283,6 +267,16 @@ struct TouchLayoutEditor: View {
                 if !editing { mapping.persist() }
             }
             .tint(Theme.Color.accent)
+
+            // 便捷功能：把当前这个按键的大小一次性应用到本系统所有按键（触摸屏是屏、不是按键，不动它）。
+            if selected != .touchScreen {
+                PillButton(title: "把这个大小应用到所有按键", style: .secondary) {
+                    mapping.applyScale(layout(selected).scale, toAllElementsForSystem: systemIdentifier)
+                    gestureOrigin = nil
+                    loadLayouts()
+                }
+                .padding(.top, Theme.Spacing.xxs)
+            }
         }
     }
 
@@ -291,31 +285,31 @@ struct TouchLayoutEditor: View {
             get: { layout(selected).scale },
             set: { newValue in
                 let current = layout(selected)
-                apply(GSTouchClusterLayout.make(x: current.x, y: current.y, scale: newValue), to: selected)
+                apply(GSTouchElementLayout.make(x: current.x, y: current.y, scale: newValue), to: selected)
             }
         )
     }
 
     // MARK: - 数据
 
-    private func layout(_ cluster: GSTouchCluster) -> GSTouchClusterLayout {
-        layouts[cluster.rawValue] ?? mapping.layout(for: cluster, system: systemIdentifier)
+    private func layout(_ element: GSTouchElement) -> GSTouchElementLayout {
+        layouts[element.rawValue] ?? mapping.layout(for: element, system: systemIdentifier)
     }
 
     private func loadLayouts() {
-        var seeded: [Int: GSTouchClusterLayout] = [:]
-        for cluster in clusters {
-            seeded[cluster.rawValue] = mapping.layout(for: cluster, system: systemIdentifier)
+        var seeded: [Int: GSTouchElementLayout] = [:]
+        for element in elements {
+            seeded[element.rawValue] = mapping.layout(for: element, system: systemIdentifier)
         }
         layouts = seeded
-        if !clusters.contains(selected), let first = clusters.first {
+        if !elements.contains(selected), let first = elements.first {
             selected = first
         }
     }
 
-    /// 该簇在播放器里是否显示（编辑器按显示状态如实呈现，做到所见即所得）
-    private func isVisible(_ cluster: GSTouchCluster) -> Bool {
-        mapping.isClusterVisible(cluster, forSystem: systemIdentifier)
+    /// 该元素在播放器里是否显示（编辑器按显示状态如实呈现，做到所见即所得）
+    private func isVisible(_ element: GSTouchElement) -> Bool {
+        mapping.isElementVisible(element, forSystem: systemIdentifier)
     }
 
     private func clamp01(_ value: CGFloat) -> CGFloat {
@@ -324,6 +318,31 @@ struct TouchLayoutEditor: View {
 
     private func clampScale(_ value: CGFloat) -> CGFloat {
         max(0.6, min(1.6, value))
+    }
+
+    /// 元素 → 按键上的文字（短标签，与播放器一致）
+    private static func label(for element: GSTouchElement) -> String {
+        switch element {
+        case .A:      return "A"
+        case .B:      return "B"
+        case .X:      return "X"
+        case .Y:      return "Y"
+        case .L:      return "L"
+        case .R:      return "R"
+        case .start:  return "START"
+        case .select: return "SELECT"
+        case .menu:   return "MENU"
+        default:      return ""
+        }
+    }
+
+    private static func fontSize(for element: GSTouchElement, metrics: GamepadMetrics, scale: CGFloat) -> CGFloat {
+        switch element {
+        case .A, .B, .X, .Y:         return metrics.faceDiameter * scale * 0.36
+        case .L, .R:                 return 14 * scale
+        case .start, .select, .menu: return 11 * scale
+        default:                     return 12 * scale
+        }
     }
 }
 
