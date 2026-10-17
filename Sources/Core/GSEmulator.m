@@ -9,6 +9,7 @@
 #import "GSSystem.h"
 #import "GSROMLibrary.h"
 #import "GSBuiltCoresCompat.h"
+#import "GSLog.h"
 
 #import <sys/mman.h>
 #import <os/lock.h>
@@ -315,8 +316,13 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
                 @"%@ 的核心还没接入这个版本，暂时打不开。%@",
                 _systemInfo.shortName,
                 _systemInfo.statusNote ?: @"见 REFERENCE.md 的「核心接入进度」"];
+            GSLogI(@"emu", @"会话创建失败：系统=%@（%@）没有可用核心，ROM=%@",
+                   _systemInfo.identifier, _systemInfo.shortName, rom.absolutePath);
         } else {
             _isAvailable = YES;
+            GSLogI(@"emu", @"会话创建：系统=%@（%@）核心=%@ 需要JIT=%d ROM=%@",
+                   _systemInfo.identifier, _systemInfo.shortName,
+                   NSStringFromClass([_core class]), _systemInfo.requiresJIT, rom.absolutePath);
         }
     }
     return self;
@@ -426,6 +432,7 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 
 - (BOOL)startWithError:(NSError **)error {
     if (!_isAvailable || _core == nil) {
+        GSLogI(@"emu", @"启动中止：无可用核心（系统=%@）", _systemInfo.identifier);
         if (error) {
             *error = [NSError errorWithDomain: GSEmulatorErrorDomain
                                          code: GSEmulatorErrorCodeNoCore
@@ -438,6 +445,8 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         return YES;
     }
     if (self.requiresJIT && self.jitStatus != GSJITStatusEnabled) {
+        GSLogI(@"emu", @"启动中止：%@ 需要 JIT 但当前拿不到可执行内存（jitStatus=%ld）",
+               _systemInfo.identifier, (long)self.jitStatus);
         if (error) {
             *error = [NSError errorWithDomain: GSEmulatorErrorDomain
                                          code: GSEmulatorErrorCodeJITRequired
@@ -450,6 +459,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     NSURL *saveURL = [GSROMLibrary batterySaveURLForROM: _rom];
     NSError *loadError = nil;
     if (![_core loadROMAtPath: _rom.absolutePath savePath: saveURL.path error: &loadError]) {
+        GSLogI(@"emu", @"启动失败：核心 %@ 载入 ROM 失败 path=%@ error=%@",
+               NSStringFromClass([_core class]), _rom.absolutePath,
+               loadError.localizedDescription ?: @"（无说明）");
         if (error) {
             *error = loadError ?: [NSError errorWithDomain: GSEmulatorErrorDomain
                                                       code: GSEmulatorErrorCodeLoadFailed
@@ -469,6 +481,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     _emulationThread.qualityOfService = NSQualityOfServiceUserInitiated;
     [_emulationThread start];
     _started = YES;
+    GSLogI(@"emu", @"启动成功：系统=%@ 核心=%@ fps=%.1f 存档=%@",
+           _systemInfo.identifier, NSStringFromClass([_core class]),
+           _core.framesPerSecond, saveURL.path);
     return YES;
 }
 
@@ -477,6 +492,7 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     // 但无论走没走到「启动成功」，只要核心已经建出来就必须回收，
     // 否则「核心 init 过、但 loadROM 失败导致 start 返回 NO」的场景会漏掉核心。
     if (_running) {
+        GSLogI(@"emu", @"停止会话：等待帧循环退出（系统=%@）", _systemInfo.identifier);
         _running = NO;
         if (_loopExitSemaphore) {
             dispatch_semaphore_wait(_loopExitSemaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)));
@@ -507,6 +523,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     if (fps < 1.0) {
         fps = 60.0;
     }
+    GSLogI(@"emu", @"帧循环进入：系统=%@ fps=%.1f 支持触摸=%d",
+           _systemInfo.identifier, fps,
+           [_core respondsToSelector: @selector(setTouchPoint:active:)]);
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     uint64_t nextFrameNs = (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
@@ -547,8 +566,13 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
                 [_core setButtonMask: _pendingButtonMask];
                 // 触摸只在核心真的实现了接口时下发（respondsToSelector: 守卫），
                 // 避免对 mGBA / Nestopia 这类不触摸的核心误发消息。
-                if (_hasPendingTouch && [_core respondsToSelector: @selector(setTouchPoint:active:)]) {
-                    [_core setTouchPoint: _pendingTouchPoint active: _pendingTouchActive];
+                if (_hasPendingTouch) {
+                    if ([_core respondsToSelector: @selector(setTouchPoint:active:)]) {
+                        [_core setTouchPoint: _pendingTouchPoint active: _pendingTouchActive];
+                    } else {
+                        GSLogI(@"emu", @"核心 %@ 不支持触摸，忽略触摸事件（系统=%@）",
+                               NSStringFromClass([_core class]), _systemInfo.identifier);
+                    }
                     _hasPendingTouch = NO;
                 }
                 [_core runFrame];
@@ -571,6 +595,7 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         }
     }
 
+    GSLogI(@"emu", @"帧循环退出：系统=%@", _systemInfo.identifier);
     if (_loopExitSemaphore) {
         dispatch_semaphore_signal(_loopExitSemaphore);
     }
@@ -646,6 +671,11 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 /// 触摸屏（NDS 下屏）。point 是触摸区内的归一化坐标（0–1）。
 /// 与 setButtonMask: 同一套「主线程写、模拟线程读」模式：只更新待生效值。
 - (void)setTouchPoint:(CGPoint)point active:(BOOL)active {
+    // 只在「按下 / 抬起」这种状态切换时记一行；拖动过程中的每个移动点不记，免得日志被刷爆。
+    if (active != _pendingTouchActive) {
+        GSLogI(@"emu", @"触摸%@：(%.3f, %.3f) 系统=%@",
+               active ? @"按下" : @"抬起", point.x, point.y, _systemInfo.identifier);
+    }
     _pendingTouchPoint = point;
     _pendingTouchActive = active;
     _hasPendingTouch = YES;

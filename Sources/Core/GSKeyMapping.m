@@ -146,6 +146,46 @@ static NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *GSParseLayoutBuc
     return bucket;
 }
 
+/// 参与配置的系统的标识全集（迁移旧「全局一套」数据时平摊到这些系统）
+static NSArray<NSString *> *GSAllSystemIdentifiers(void) {
+    return @[@"nes", @"snes", @"gb", @"gbc", @"gba", @"nds"];
+}
+
+/// 判断一份键位字典是「按系统分桶」的新格式还是「全局一套」的旧格式。
+/// 新格式：值都是字典（system → 桶）；旧格式：值都是标量（按钮键名 → usage / 标识）。
+static BOOL GSBucketIsPerSystem(NSDictionary *source) {
+    for (id value in source.allValues) {
+        if ([value isKindOfClass: [NSDictionary class]]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+/// 解析一份「按钮键名 → HID usage」桶（键盘）
+static NSDictionary<NSString *, NSNumber *> *GSParseKeyboardBucket(NSDictionary *source) {
+    NSMutableDictionary<NSString *, NSNumber *> *bucket = [NSMutableDictionary dictionary];
+    for (id key in source) {
+        id value = source[key];
+        if ([key isKindOfClass: [NSString class]] && [value isKindOfClass: [NSNumber class]]) {
+            bucket[key] = value;
+        }
+    }
+    return bucket;
+}
+
+/// 解析一份「按钮键名 → 手柄标识」桶（手柄）
+static NSDictionary<NSString *, NSString *> *GSParseGamepadBucket(NSDictionary *source) {
+    NSMutableDictionary<NSString *, NSString *> *bucket = [NSMutableDictionary dictionary];
+    for (id key in source) {
+        id value = source[key];
+        if ([key isKindOfClass: [NSString class]] && [value isKindOfClass: [NSString class]]) {
+            bucket[key] = value;
+        }
+    }
+    return bucket;
+}
+
 #pragma mark - 各系统的按键簇 profile
 
 /// 系统标识规整（小写）；nil / 空归成空串
@@ -239,8 +279,10 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
 #pragma mark -
 
 @interface GSKeyMapping ()
-@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *keyboardBindings;
-@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *gamepadBindings;
+/// 按系统的键盘绑定：system → (按钮键名 → HID usage)；没存进来的系统回落内置默认
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, NSNumber *> *> *keyboardBindings;
+/// 按系统的手柄绑定：system → (按钮键名 → 手柄标识)；没存进来的系统回落内置默认
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, NSString *> *> *gamepadBindings;
 /// 按系统的自定义布局：system → (GSTouchCluster 的 NSNumber → layout)；没存进来的就是内置默认
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableDictionary<NSNumber *, GSTouchClusterLayout *> *> *touchLayouts;
 /// 按系统的可见性覆盖：system → (GSTouchCluster 的 NSNumber → NSNumber(BOOL))；没有覆盖时按默认显示
@@ -248,6 +290,8 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
 
 + (NSDictionary<NSString *, NSNumber *> *)defaultKeyboardBindings;
 + (NSDictionary<NSString *, NSString *> *)defaultGamepadBindings;
+- (NSDictionary *)keyboardRepresentation;
+- (NSDictionary *)gamepadRepresentation;
 - (void)loadFromDisk;
 @end
 
@@ -270,8 +314,7 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
         _touchLayouts = [NSMutableDictionary dictionary];
         _touchVisibility = [NSMutableDictionary dictionary];
         [self applyDefaultTouchProfile];
-        _keyboardBindings = [[GSKeyMapping defaultKeyboardBindings] mutableCopy];
-        _gamepadBindings = [[GSKeyMapping defaultGamepadBindings] mutableCopy];
+        // 键盘 / 手柄不再预置「全局一套」：各系统没自定义时按默认值回落（见读写方法）
         [self loadFromDisk];
     }
     return self;
@@ -436,94 +479,160 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
     };
 }
 
-#pragma mark - 键盘
+#pragma mark - 键盘（按系统分桶）
 
-- (GSButton)buttonForKeyboardUsage:(NSInteger)usage {
-    for (NSString *key in self.keyboardBindings) {
-        if ([self.keyboardBindings[key] integerValue] == usage) {
+/// 某系统的键盘桶；没存进来时回落内置默认（只读用，不落盘）
+- (NSDictionary<NSString *, NSNumber *> *)keyboardBucketForSystem:(NSString *)systemIdentifier {
+    NSDictionary *bucket = self.keyboardBindings[GSSystemKey(systemIdentifier)];
+    return bucket != nil ? bucket : [GSKeyMapping defaultKeyboardBindings];
+}
+
+/// 某系统的键盘桶，可写版：没有就按内置默认造一个并正式存进来，
+/// 这样「清除某个键」也会被记住（否则清完又被默认值顶回来）。
+- (NSMutableDictionary<NSString *, NSNumber *> *)writableKeyboardBucketForSystem:(NSString *)systemIdentifier {
+    NSString *system = GSSystemKey(systemIdentifier);
+    NSMutableDictionary<NSString *, NSNumber *> *bucket = self.keyboardBindings[system];
+    if (bucket == nil) {
+        bucket = [[GSKeyMapping defaultKeyboardBindings] mutableCopy];
+        self.keyboardBindings[system] = bucket;
+    }
+    return bucket;
+}
+
+- (GSButton)buttonForKeyboardUsage:(NSInteger)usage forSystem:(NSString *)systemIdentifier {
+    NSDictionary<NSString *, NSNumber *> *bucket = [self keyboardBucketForSystem: systemIdentifier];
+    for (NSString *key in bucket) {
+        if ([bucket[key] integerValue] == usage) {
             return GSButtonFromKey(key);
         }
     }
     return 0;
 }
 
-- (void)setKeyboardUsage:(NSInteger)usage forButton:(GSButton)button {
+- (void)setKeyboardUsage:(NSInteger)usage forButton:(GSButton)button forSystem:(NSString *)systemIdentifier {
     NSString *key = GSButtonKey(button);
     if (key.length == 0) {
         return;
     }
+    NSMutableDictionary<NSString *, NSNumber *> *bucket = [self writableKeyboardBucketForSystem: systemIdentifier];
     // 一个键只绑一个按钮：先清掉同一 usage 的旧绑定
-    for (NSString *existing in [self.keyboardBindings.allKeys copy]) {
-        if ([self.keyboardBindings[existing] integerValue] == usage) {
-            [self.keyboardBindings removeObjectForKey: existing];
+    for (NSString *existing in [bucket.allKeys copy]) {
+        if ([bucket[existing] integerValue] == usage) {
+            [bucket removeObjectForKey: existing];
         }
     }
-    self.keyboardBindings[key] = @(usage);
+    bucket[key] = @(usage);
     [self persist];
 }
 
-- (void)clearKeyboardBindingForButton:(GSButton)button {
+- (void)clearKeyboardBindingForButton:(GSButton)button forSystem:(NSString *)systemIdentifier {
     NSString *key = GSButtonKey(button);
     if (key.length == 0) {
         return;
     }
-    [self.keyboardBindings removeObjectForKey: key];
+    // 先确保该系统的桶存在，再删键 —— 否则删完仍会回落到默认值
+    [self writableKeyboardBucketForSystem: systemIdentifier];
+    [self.keyboardBindings[GSSystemKey(systemIdentifier)] removeObjectForKey: key];
     [self persist];
 }
 
-- (nullable NSString *)keyboardBindingLabelForButton:(GSButton)button {
+- (nullable NSString *)keyboardBindingLabelForButton:(GSButton)button forSystem:(NSString *)systemIdentifier {
     NSString *key = GSButtonKey(button);
-    NSNumber *usage = key.length > 0 ? self.keyboardBindings[key] : nil;
+    if (key.length == 0) {
+        return nil;
+    }
+    NSNumber *usage = [self keyboardBucketForSystem: systemIdentifier][key];
     if (usage == nil) {
         return nil;
     }
     return GSKeyboardLabel(usage.integerValue);
 }
 
-#pragma mark - 手柄
+- (BOOL)hasCustomKeyboardForSystem:(NSString *)systemIdentifier {
+    return self.keyboardBindings[GSSystemKey(systemIdentifier)] != nil;
+}
 
-- (GSButton)buttonForGamepadIdentifier:(NSString *)identifier {
+- (void)resetKeyboardForSystem:(NSString *)systemIdentifier {
+    [self.keyboardBindings removeObjectForKey: GSSystemKey(systemIdentifier)];
+    [self persist];
+}
+
+#pragma mark - 手柄（按系统分桶）
+
+/// 某系统的手柄桶；没存进来时回落内置默认（只读用，不落盘）
+- (NSDictionary<NSString *, NSString *> *)gamepadBucketForSystem:(NSString *)systemIdentifier {
+    NSDictionary *bucket = self.gamepadBindings[GSSystemKey(systemIdentifier)];
+    return bucket != nil ? bucket : [GSKeyMapping defaultGamepadBindings];
+}
+
+/// 某系统的手柄桶，可写版（同键盘：清键也要能被记住）
+- (NSMutableDictionary<NSString *, NSString *> *)writableGamepadBucketForSystem:(NSString *)systemIdentifier {
+    NSString *system = GSSystemKey(systemIdentifier);
+    NSMutableDictionary<NSString *, NSString *> *bucket = self.gamepadBindings[system];
+    if (bucket == nil) {
+        bucket = [[GSKeyMapping defaultGamepadBindings] mutableCopy];
+        self.gamepadBindings[system] = bucket;
+    }
+    return bucket;
+}
+
+- (GSButton)buttonForGamepadIdentifier:(NSString *)identifier forSystem:(NSString *)systemIdentifier {
     if (identifier.length == 0) {
         return 0;
     }
-    for (NSString *key in self.gamepadBindings) {
-        if ([self.gamepadBindings[key] isEqualToString: identifier]) {
+    NSDictionary<NSString *, NSString *> *bucket = [self gamepadBucketForSystem: systemIdentifier];
+    for (NSString *key in bucket) {
+        if ([bucket[key] isEqualToString: identifier]) {
             return GSButtonFromKey(key);
         }
     }
     return 0;
 }
 
-- (void)setGamepadIdentifier:(NSString *)identifier forButton:(GSButton)button {
+- (void)setGamepadIdentifier:(NSString *)identifier forButton:(GSButton)button forSystem:(NSString *)systemIdentifier {
     NSString *key = GSButtonKey(button);
     if (key.length == 0 || identifier.length == 0) {
         return;
     }
-    for (NSString *existing in [self.gamepadBindings.allKeys copy]) {
-        if ([self.gamepadBindings[existing] isEqualToString: identifier]) {
-            [self.gamepadBindings removeObjectForKey: existing];
+    NSMutableDictionary<NSString *, NSString *> *bucket = [self writableGamepadBucketForSystem: systemIdentifier];
+    for (NSString *existing in [bucket.allKeys copy]) {
+        if ([bucket[existing] isEqualToString: identifier]) {
+            [bucket removeObjectForKey: existing];
         }
     }
-    self.gamepadBindings[key] = identifier;
+    bucket[key] = identifier;
     [self persist];
 }
 
-- (void)clearGamepadBindingForButton:(GSButton)button {
+- (void)clearGamepadBindingForButton:(GSButton)button forSystem:(NSString *)systemIdentifier {
     NSString *key = GSButtonKey(button);
     if (key.length == 0) {
         return;
     }
-    [self.gamepadBindings removeObjectForKey: key];
+    [self writableGamepadBucketForSystem: systemIdentifier];
+    [self.gamepadBindings[GSSystemKey(systemIdentifier)] removeObjectForKey: key];
     [self persist];
 }
 
-- (nullable NSString *)gamepadBindingLabelForButton:(GSButton)button {
+- (nullable NSString *)gamepadBindingLabelForButton:(GSButton)button forSystem:(NSString *)systemIdentifier {
     NSString *key = GSButtonKey(button);
-    NSString *identifier = key.length > 0 ? self.gamepadBindings[key] : nil;
+    if (key.length == 0) {
+        return nil;
+    }
+    NSString *identifier = [self gamepadBucketForSystem: systemIdentifier][key];
     if (identifier.length == 0) {
         return nil;
     }
     return GSGamepadLabel(identifier);
+}
+
+- (BOOL)hasCustomGamepadForSystem:(NSString *)systemIdentifier {
+    return self.gamepadBindings[GSSystemKey(systemIdentifier)] != nil;
+}
+
+- (void)resetGamepadForSystem:(NSString *)systemIdentifier {
+    [self.gamepadBindings removeObjectForKey: GSSystemKey(systemIdentifier)];
+    [self persist];
 }
 
 #pragma mark - 持久化
@@ -543,16 +652,41 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
 
 - (NSDictionary *)dictionaryRepresentation {
     return @{
-        @"version": @2,
+        @"version": @3,
         @"touch": @{
             @"scale": @(self.touchScale),
             @"opacity": @(self.touchOpacity),
         },
         @"visibility": [self touchVisibilityRepresentation],
-        @"keyboard": [self.keyboardBindings copy],
-        @"gamepad": [self.gamepadBindings copy],
+        @"keyboard": [self keyboardRepresentation],
+        @"gamepad": [self gamepadRepresentation],
         @"layouts": [self touchLayoutsRepresentation],
     };
+}
+
+/// 键盘绑定的持久化形式：system → (按钮键名 → HID usage)。
+/// 没自定义过的系统不写盘，读回时自然回落该系统的内置默认值。
+- (NSDictionary *)keyboardRepresentation {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSString *system in self.keyboardBindings) {
+        NSDictionary<NSString *, NSNumber *> *bucket = self.keyboardBindings[system];
+        if (bucket.count > 0) {
+            result[system] = [bucket copy];
+        }
+    }
+    return result;
+}
+
+/// 手柄绑定的持久化形式：system → (按钮键名 → 手柄标识)
+- (NSDictionary *)gamepadRepresentation {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSString *system in self.gamepadBindings) {
+        NSDictionary<NSString *, NSString *> *bucket = self.gamepadBindings[system];
+        if (bucket.count > 0) {
+            result[system] = [bucket copy];
+        }
+    }
+    return result;
 }
 
 /// 按键簇布局的持久化形式：system → (cluster → {x,y,scale})；
@@ -634,16 +768,24 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
                               [touch[@"showStartSelect"] isKindOfClass: [NSNumber class]]);
     }
 
+    // 键盘：新格式是 system → (按钮键名 → usage)；旧格式是扁平的 按钮键名 → usage（要迁移）
+    NSDictionary<NSString *, NSNumber *> *legacyKeyboard = nil;
     NSDictionary *keyboard = dictionary[@"keyboard"];
     if ([keyboard isKindOfClass: [NSDictionary class]]) {
-        NSMutableDictionary<NSString *, NSNumber *> *loaded = [NSMutableDictionary dictionary];
-        for (id key in keyboard) {
-            id value = keyboard[key];
-            if ([key isKindOfClass: [NSString class]] && [value isKindOfClass: [NSNumber class]]) {
-                loaded[key] = value;
+        if (GSBucketIsPerSystem(keyboard)) {
+            for (id systemKey in keyboard) {
+                if (![systemKey isKindOfClass: [NSString class]] ||
+                    ![keyboard[systemKey] isKindOfClass: [NSDictionary class]]) {
+                    continue;
+                }
+                NSDictionary<NSString *, NSNumber *> *bucket = GSParseKeyboardBucket(keyboard[systemKey]);
+                if (bucket.count > 0) {
+                    self.keyboardBindings[[systemKey lowercaseString]] = [bucket mutableCopy];
+                }
             }
+        } else {
+            legacyKeyboard = GSParseKeyboardBucket(keyboard);
         }
-        self.keyboardBindings = loaded;
     }
 
     // 布局：新格式是 system → cluster → {x,y,scale}；
@@ -722,16 +864,36 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
         }
     }
 
+    // 手柄：同上，新格式按系统分桶，旧格式（扁平）要迁移
+    NSDictionary<NSString *, NSString *> *legacyGamepad = nil;
     NSDictionary *gamepad = dictionary[@"gamepad"];
     if ([gamepad isKindOfClass: [NSDictionary class]]) {
-        NSMutableDictionary<NSString *, NSString *> *loaded = [NSMutableDictionary dictionary];
-        for (id key in gamepad) {
-            id value = gamepad[key];
-            if ([key isKindOfClass: [NSString class]] && [value isKindOfClass: [NSString class]]) {
-                loaded[key] = value;
+        if (GSBucketIsPerSystem(gamepad)) {
+            for (id systemKey in gamepad) {
+                if (![systemKey isKindOfClass: [NSString class]] ||
+                    ![gamepad[systemKey] isKindOfClass: [NSDictionary class]]) {
+                    continue;
+                }
+                NSDictionary<NSString *, NSString *> *bucket = GSParseGamepadBucket(gamepad[systemKey]);
+                if (bucket.count > 0) {
+                    self.gamepadBindings[[systemKey lowercaseString]] = [bucket mutableCopy];
+                }
+            }
+        } else {
+            legacyGamepad = GSParseGamepadBucket(gamepad);
+        }
+    }
+
+    // 旧格式迁移：把「全局一套」的键盘 / 手柄绑定平摊给每个系统
+    if (legacyKeyboard.count > 0 || legacyGamepad.count > 0) {
+        for (NSString *system in GSAllSystemIdentifiers()) {
+            if (legacyKeyboard.count > 0) {
+                self.keyboardBindings[system] = [legacyKeyboard mutableCopy];
+            }
+            if (legacyGamepad.count > 0) {
+                self.gamepadBindings[system] = [legacyGamepad mutableCopy];
             }
         }
-        self.gamepadBindings = loaded;
     }
 }
 
@@ -739,8 +901,9 @@ static GSTouchClusterLayout *GSDefaultLayoutForCluster(GSTouchCluster cluster, N
     [self applyDefaultTouchProfile];
     [self.touchLayouts removeAllObjects];
     [self.touchVisibility removeAllObjects];
-    self.keyboardBindings = [[GSKeyMapping defaultKeyboardBindings] mutableCopy];
-    self.gamepadBindings = [[GSKeyMapping defaultGamepadBindings] mutableCopy];
+    // 键盘 / 手柄清空分桶即「所有系统都回落到内置默认」（读写方法里就是这么回落的）
+    [self.keyboardBindings removeAllObjects];
+    [self.gamepadBindings removeAllObjects];
     [self persist];
 }
 

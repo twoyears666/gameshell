@@ -20,6 +20,8 @@ final class EmulatorInputCoordinator: ObservableObject {
 
     private weak var session: GSEmulatorSession?
     private var mapping: GSKeyMapping?
+    /// 当前会话的系统标识：键盘 / 手柄键位都按系统查（各系统各一套绑定）
+    private var systemIdentifier = ""
 
     private var touchMask: GSButton = []
     private var keyboardMask: GSButton = []
@@ -27,9 +29,11 @@ final class EmulatorInputCoordinator: ObservableObject {
     private var forwarding = false
 
     /// 进入模拟器时挂上会话与键位表，并开始转发手柄按键
-    func attach(session: GSEmulatorSession?, mapping: GSKeyMapping) {
+    func attach(session: GSEmulatorSession?, mapping: GSKeyMapping, systemIdentifier: String) {
         self.session = session
         self.mapping = mapping
+        self.systemIdentifier = systemIdentifier
+        GSLog.tag("input", message: "输入协调器挂载：system=\(systemIdentifier) 核心=\(session?.core?.coreName ?? "无")")
 
         guard !forwarding else { return }
         forwarding = true
@@ -44,8 +48,10 @@ final class EmulatorInputCoordinator: ObservableObject {
             GSInputManager.shared().endButtonForwarding()
             forwarding = false
         }
+        GSLog.tag("input", message: "输入协调器卸载：system=\(systemIdentifier)")
         session = nil
         mapping = nil
+        systemIdentifier = ""
         touchMask = []
         keyboardMask = []
         gamepadMask = []
@@ -57,10 +63,10 @@ final class EmulatorInputCoordinator: ObservableObject {
         push()
     }
 
-    /// 硬件键盘的按下 / 抬起
+    /// 硬件键盘的按下 / 抬起（键位按当前系统查）
     func handleKeyboard(_ usage: UIKeyboardHIDUsage, pressed: Bool) {
         guard let mapping else { return }
-        let button = mapping.button(forKeyboardUsage: usage.rawValue)
+        let button = mapping.button(keyboardUsage: usage.rawValue, system: systemIdentifier)
         guard button.rawValue != 0 else { return }
 
         if pressed {
@@ -71,11 +77,13 @@ final class EmulatorInputCoordinator: ObservableObject {
         push()
     }
 
-    /// 手柄按键（identifier 是 GCController 的按钮字典键）
+    /// 手柄按键（identifier 是 GCController 的按钮字典键；键位按当前系统查）
     private func handleGamepad(_ identifier: String, pressed: Bool) {
         guard let mapping else { return }
-        let button = mapping.button(forGamepadIdentifier: identifier)
-        guard button.rawValue != 0 else { return }
+        let button = mapping.button(gamepadIdentifier: identifier, system: systemIdentifier)
+        guard button.rawValue != 0 else {
+            return
+        }
 
         if pressed {
             gamepadMask.formUnion(button)

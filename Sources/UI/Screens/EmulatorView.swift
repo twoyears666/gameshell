@@ -53,7 +53,9 @@ struct EmulatorView: View {
         }
         .onAppear {
             frames.attach(state.emulatorSession)
-            input.attach(session: state.emulatorSession, mapping: state.keyMapping)
+            input.attach(session: state.emulatorSession,
+                         mapping: state.keyMapping,
+                         systemIdentifier: state.emulatorSession?.systemInfo.identifier ?? "")
         }
         .onDisappear {
             frames.detach()

@@ -2,16 +2,16 @@
 //  GSKeyMapping.h
 //  Gameshell
 //
-//  三端键位配置（触屏 / 键盘 / 手柄）。触屏的键位布局与可见性**按系统区分**，
-//  键盘 / 手柄仍是全局一套。
+//  三端键位配置（触屏 / 键盘 / 手柄），**三端都按系统区分**。
 //
 //    · 触屏：虚拟手柄的整体缩放与透明度（全局），以及各按键簇是否显示、
 //      每一簇的位置与大小（按系统分别保存）；
-//    · 键盘：UIKeyboardHIDUsage（HID 键码）→ GSButton；
-//    · 手柄：GCController 的按钮字典键（"Button A" / "Direction Pad Up" …）→ GSButton。
+//    · 键盘：UIKeyboardHIDUsage（HID 键码）→ GSButton（按系统分别保存）；
+//    · 手柄：GCController 的按钮字典键（"Button A" / "Direction Pad Up" …）→ GSButton（按系统分别保存）。
 //
 //  为什么要按系统分：各机器的按键分布本来就不一样 —— GBA 只要 A/B + L/R；
-//  SNES 与 NDS 是 A/B/X/Y 四键；NDS 还多一个 Menu 与下屏触摸区。
+//  SNES 与 NDS 是 A/B/X/Y 四键；NDS 还多一个 Menu 与下屏触摸区；
+//  8 位机（NES / GB / GBC）根本没有 L/R/ X/Y 这些键，键盘 / 手柄自然也不该共用一套。
 //  默认数值参照 Delta 的各套皮肤（Standard GBA / Standard DS）。
 //
 //  配置持久化在沙盒 `Documents/keymap.json`；读不到就回落到内置默认值，
@@ -88,23 +88,35 @@ typedef NS_ENUM(NSInteger, GSTouchCluster) {
 - (BOOL)isClusterVisible:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(isClusterVisible(_:forSystem:));
 - (void)setVisible:(BOOL)visible forCluster:(GSTouchCluster)cluster forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(setVisible(_:forCluster:system:));
 
-#pragma mark - 键盘（usage = UIKeyboardHIDUsage 的 rawValue）
+#pragma mark - 键盘（usage = UIKeyboardHIDUsage 的 rawValue；按系统分桶）
 
-/// 该 HID 键码绑到的按钮；没绑定返回 0
-- (GSButton)buttonForKeyboardUsage:(NSInteger)usage;
-- (void)setKeyboardUsage:(NSInteger)usage forButton:(GSButton)button;
-- (void)clearKeyboardBindingForButton:(GSButton)button;
-/// 该按钮当前绑的键，显示用（"Z" / "↑" …）；没绑返回 nil
-- (nullable NSString *)keyboardBindingLabelForButton:(GSButton)button;
+/// 该 HID 键码在某系统里绑到的按钮；没绑定返回 0
+- (GSButton)buttonForKeyboardUsage:(NSInteger)usage forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(button(keyboardUsage:system:));
+/// 给某系统里某按钮绑键（同一系统内一个键只绑一个按钮）
+- (void)setKeyboardUsage:(NSInteger)usage forButton:(GSButton)button forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(setKeyboardUsage(_:for:system:));
+/// 清掉某系统里某按钮的键盘绑定（此后该按钮在此系统里就是「未绑定」）
+- (void)clearKeyboardBindingForButton:(GSButton)button forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(clearKeyboardBinding(for:system:));
+/// 某系统里该按钮当前绑的键，显示用（"Z" / "↑" …）；没绑返回 nil
+- (nullable NSString *)keyboardBindingLabelForButton:(GSButton)button forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(keyboardBindingLabel(for:system:));
+/// 该系统的键盘绑定有没有被用户改过（设置页显示「已自定义」用）
+- (BOOL)hasCustomKeyboardForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(hasCustomKeyboard(forSystem:));
+/// 把某系统的键盘绑定恢复成内置默认
+- (void)resetKeyboardForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(resetKeyboard(forSystem:));
 
-#pragma mark - 手柄（identifier = GCController 的按钮字典键）
+#pragma mark - 手柄（identifier = GCController 的按钮字典键；按系统分桶）
 
-/// 该手柄标识绑到的按钮；没绑定返回 0
-- (GSButton)buttonForGamepadIdentifier:(NSString *)identifier;
-- (void)setGamepadIdentifier:(NSString *)identifier forButton:(GSButton)button;
-- (void)clearGamepadBindingForButton:(GSButton)button;
-/// 该按钮当前绑的手柄键，显示用（"A" / "L1" …）；没绑返回 nil
-- (nullable NSString *)gamepadBindingLabelForButton:(GSButton)button;
+/// 该手柄标识在某系统里绑到的按钮；没绑定返回 0
+- (GSButton)buttonForGamepadIdentifier:(NSString *)identifier forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(button(gamepadIdentifier:system:));
+/// 给某系统里某按钮绑手柄键（同一系统内一个手柄键只绑一个按钮）
+- (void)setGamepadIdentifier:(NSString *)identifier forButton:(GSButton)button forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(setGamepadIdentifier(_:for:system:));
+/// 清掉某系统里某按钮的手柄绑定
+- (void)clearGamepadBindingForButton:(GSButton)button forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(clearGamepadBinding(for:system:));
+/// 某系统里该按钮当前绑的手柄键，显示用（"A" / "L1" …）；没绑返回 nil
+- (nullable NSString *)gamepadBindingLabelForButton:(GSButton)button forSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(gamepadBindingLabel(for:system:));
+/// 该系统的手柄绑定有没有被用户改过（设置页显示「已自定义」用）
+- (BOOL)hasCustomGamepadForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(hasCustomGamepad(forSystem:));
+/// 把某系统的手柄绑定恢复成内置默认
+- (void)resetGamepadForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(resetGamepad(forSystem:));
 
 #pragma mark - 持久化
 

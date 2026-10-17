@@ -235,23 +235,27 @@ final class GSBindingCapture: ObservableObject {
 
     private(set) var mode: Mode = .keyboard
     private var forwardingGamepad = false
+    /// 正在给哪个系统绑（键盘 / 手柄都按系统分别保存，绑的时候要知道写进哪个桶）
+    private var boundSystem = "gba"
 
     private let mapping = GSKeyMapping.shared()
     private var escapeUsage: Int { Int(UIKeyboardHIDUsage.keyboardEscape.rawValue) }
 
     var isBinding: Bool { pending != nil }
 
-    func startKeyboardBind(_ button: GSButton) {
+    func startKeyboardBind(_ button: GSButton, system: String) {
         stopGamepadForwarding()
         mode = .keyboard
         pending = button
+        boundSystem = system
         awaitingKeyboard = true
         revision += 1
     }
 
-    func startGamepadBind(_ button: GSButton) {
+    func startGamepadBind(_ button: GSButton, system: String) {
         mode = .gamepad
         pending = button
+        boundSystem = system
         awaitingKeyboard = false
 
         guard !forwardingGamepad else { return }
@@ -269,7 +273,7 @@ final class GSBindingCapture: ObservableObject {
             cancel()
             return
         }
-        mapping.setKeyboardUsage(Int(usage.rawValue), for: pending)
+        mapping.setKeyboardUsage(Int(usage.rawValue), for: pending, system: boundSystem)
         mapping.persist()
         self.awaitingKeyboard = false
         self.pending = nil
@@ -278,21 +282,21 @@ final class GSBindingCapture: ObservableObject {
 
     func bindGamepad(_ identifier: String) {
         guard mode == .gamepad, let pending else { return }
-        mapping.setGamepadIdentifier(identifier, for: pending)
+        mapping.setGamepadIdentifier(identifier, for: pending, system: boundSystem)
         mapping.persist()
         self.pending = nil
         stopGamepadForwarding()
         revision += 1
     }
 
-    func clearKeyboard(_ button: GSButton) {
-        mapping.clearKeyboardBinding(for: button)
+    func clearKeyboard(_ button: GSButton, system: String) {
+        mapping.clearKeyboardBinding(for: button, system: system)
         mapping.persist()
         revision += 1
     }
 
-    func clearGamepad(_ button: GSButton) {
-        mapping.clearGamepadBinding(for: button)
+    func clearGamepad(_ button: GSButton, system: String) {
+        mapping.clearGamepadBinding(for: button, system: system)
         mapping.persist()
         revision += 1
     }
@@ -343,6 +347,58 @@ private struct SettingsCard<Content: View>: View {
 
 // MARK: - 触屏
 
+/// 设置页默认编辑哪个系统：优先 GBA（最经典的布局），否则取第一个已接入的系统
+private func defaultSettingsSystemIdentifier() -> String {
+    let systems = GSSystemRegistry.integratedSystems()
+    if let gba = systems.first(where: { $0.identifier == "gba" }) {
+        return gba.identifier
+    }
+    return systems.first?.identifier ?? "gba"
+}
+
+/// 系统选择器：横排小胶囊，点一下切换正在编辑的系统（触屏 / 键盘 / 手柄三张卡共用）
+private struct SystemPickerBar: View {
+    let systems: [GSSystemInfo]
+    @Binding var selection: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("正在编辑的系统")
+                .font(Theme.Font.chip)
+                .foregroundStyle(Theme.Color.textSecondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    ForEach(systems, id: \.identifier) { info in
+                        Button {
+                            selection = info.identifier
+                        } label: {
+                            Text(info.shortName)
+                                .font(Theme.Font.chip)
+                                .foregroundStyle(selection == info.identifier
+                                                 ? Theme.Color.background
+                                                 : Theme.Color.textPrimary)
+                                .padding(.horizontal, Theme.Spacing.sm)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                                        .fill(selection == info.identifier
+                                              ? Theme.Color.accent
+                                              : Theme.Color.surface)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                                                .stroke(Theme.Color.border, lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct TouchSettingsCard: View {
     let mapping: GSKeyMapping
     /// 打开布局编辑器（拖拽移动 / 调整大小）；参数是要编辑的系统标识
@@ -358,16 +414,7 @@ private struct TouchSettingsCard: View {
         self.onEditLayout = onEditLayout
         _scale = State(initialValue: mapping.touchScale)
         _opacity = State(initialValue: mapping.touchOpacity)
-        _systemIdentifier = State(initialValue: Self.defaultSystemIdentifier)
-    }
-
-    /// 默认编辑哪个系统：优先 GBA（最经典的布局），否则取第一个已接入的系统
-    private static var defaultSystemIdentifier: String {
-        let systems = GSSystemRegistry.integratedSystems()
-        if let gba = systems.first(where: { $0.identifier == "gba" }) {
-            return gba.identifier
-        }
-        return systems.first?.identifier ?? "gba"
+        _systemIdentifier = State(initialValue: defaultSettingsSystemIdentifier())
     }
 
     private var systems: [GSSystemInfo] {
@@ -384,7 +431,7 @@ private struct TouchSettingsCard: View {
         SettingsCard(title: "触屏手柄",
                      subtitle: "缩放、透明度是全局的；各按键簇是否显示、位置与大小按系统分别保存") {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                systemPicker
+                SystemPickerBar(systems: systems, selection: $systemIdentifier)
 
                 slider(title: "缩放",
                        value: $scale,
@@ -410,44 +457,6 @@ private struct TouchSettingsCard: View {
                     onEditLayout(systemIdentifier)
                 }
                 .padding(.top, Theme.Spacing.xxs)
-            }
-        }
-    }
-
-    /// 系统选择器：横排小胶囊，点一下切换正在编辑的系统
-    private var systemPicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("正在编辑的系统")
-                .font(Theme.Font.chip)
-                .foregroundStyle(Theme.Color.textSecondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Spacing.xs) {
-                    ForEach(systems, id: \.identifier) { info in
-                        Button {
-                            systemIdentifier = info.identifier
-                        } label: {
-                            Text(info.shortName)
-                                .font(Theme.Font.chip)
-                                .foregroundStyle(systemIdentifier == info.identifier
-                                                 ? Theme.Color.background
-                                                 : Theme.Color.textPrimary)
-                                .padding(.horizontal, Theme.Spacing.sm)
-                                .padding(.vertical, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
-                                        .fill(systemIdentifier == info.identifier
-                                              ? Theme.Color.accent
-                                              : Theme.Color.surface)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
-                                                .stroke(Theme.Color.border, lineWidth: 1)
-                                        )
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
             }
         }
     }
@@ -545,23 +554,43 @@ private struct BindingRow: View {
 private struct KeyboardSettingsCard: View {
     let mapping: GSKeyMapping
     @ObservedObject var capture: GSBindingCapture
+    /// 键盘绑定按系统分开存：先选系统，再给该系统绑键
+    @State private var systemIdentifier: String
+
+    init(mapping: GSKeyMapping, capture: GSBindingCapture) {
+        self.mapping = mapping
+        self.capture = capture
+        _systemIdentifier = State(initialValue: defaultSettingsSystemIdentifier())
+    }
+
+    private var systems: [GSSystemInfo] {
+        GSSystemRegistry.integratedSystems()
+    }
 
     private var buttons: [UInt32] {
         GSKeyMapping.configurableButtons().map { $0.uint32Value }
     }
 
     var body: some View {
-        SettingsCard(title: "键盘", subtitle: "点「绑定」后按下键盘上的键即可，Esc 取消") {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(buttons, id: \.self) { raw in
-                    BindingRow(raw: raw,
-                               label: mapping.keyboardBindingLabel(for: GSButton(rawValue: raw)),
-                               isCapturing: capture.isBinding
-                                   && capture.mode == .keyboard
-                                   && capture.pending == GSButton(rawValue: raw),
-                               onBind: { capture.startKeyboardBind(GSButton(rawValue: raw)) },
-                               onClear: { capture.clearKeyboard(GSButton(rawValue: raw)) },
-                               onCancel: { capture.cancel() })
+        SettingsCard(title: "键盘",
+                     subtitle: "键盘绑定按系统分开；先选系统，再点「绑定」按键盘上的键，Esc 取消") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                SystemPickerBar(systems: systems, selection: $systemIdentifier)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(buttons, id: \.self) { raw in
+                        BindingRow(raw: raw,
+                                   label: mapping.keyboardBindingLabel(for: GSButton(rawValue: raw),
+                                                                       system: systemIdentifier),
+                                   isCapturing: capture.isBinding
+                                       && capture.mode == .keyboard
+                                       && capture.pending == GSButton(rawValue: raw),
+                                   onBind: { capture.startKeyboardBind(GSButton(rawValue: raw),
+                                                                       system: systemIdentifier) },
+                                   onClear: { capture.clearKeyboard(GSButton(rawValue: raw),
+                                                                    system: systemIdentifier) },
+                                   onCancel: { capture.cancel() })
+                    }
                 }
             }
         }
@@ -571,23 +600,43 @@ private struct KeyboardSettingsCard: View {
 private struct GamepadSettingsCard: View {
     let mapping: GSKeyMapping
     @ObservedObject var capture: GSBindingCapture
+    /// 手柄绑定按系统分开存：先选系统，再给该系统绑键
+    @State private var systemIdentifier: String
+
+    init(mapping: GSKeyMapping, capture: GSBindingCapture) {
+        self.mapping = mapping
+        self.capture = capture
+        _systemIdentifier = State(initialValue: defaultSettingsSystemIdentifier())
+    }
+
+    private var systems: [GSSystemInfo] {
+        GSSystemRegistry.integratedSystems()
+    }
 
     private var buttons: [UInt32] {
         GSKeyMapping.configurableButtons().map { $0.uint32Value }
     }
 
     var body: some View {
-        SettingsCard(title: "手柄", subtitle: "点「绑定」后按手柄上的键即可（需要先连上手柄）") {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(buttons, id: \.self) { raw in
-                    BindingRow(raw: raw,
-                               label: mapping.gamepadBindingLabel(for: GSButton(rawValue: raw)),
-                               isCapturing: capture.isBinding
-                                   && capture.mode == .gamepad
-                                   && capture.pending == GSButton(rawValue: raw),
-                               onBind: { capture.startGamepadBind(GSButton(rawValue: raw)) },
-                               onClear: { capture.clearGamepad(GSButton(rawValue: raw)) },
-                               onCancel: { capture.cancel() })
+        SettingsCard(title: "手柄",
+                     subtitle: "手柄绑定按系统分开；先选系统，再点「绑定」按手柄上的键（需要先连上手柄）") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                SystemPickerBar(systems: systems, selection: $systemIdentifier)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(buttons, id: \.self) { raw in
+                        BindingRow(raw: raw,
+                                   label: mapping.gamepadBindingLabel(for: GSButton(rawValue: raw),
+                                                                      system: systemIdentifier),
+                                   isCapturing: capture.isBinding
+                                       && capture.mode == .gamepad
+                                       && capture.pending == GSButton(rawValue: raw),
+                                   onBind: { capture.startGamepadBind(GSButton(rawValue: raw),
+                                                                      system: systemIdentifier) },
+                                   onClear: { capture.clearGamepad(GSButton(rawValue: raw),
+                                                                   system: systemIdentifier) },
+                                   onCancel: { capture.cancel() })
+                    }
                 }
             }
         }

@@ -345,9 +345,12 @@ final class AppState: ObservableObject {
     func launchROM(_ rom: GSROM) {
         let info = GSSystemRegistry.info(for: rom.system)
         guard GSEmulatorSession.hasCore(for: rom.system) else {
+            GSLog.tag("emu", message: "启动被拒：\(info.identifier) 尚无可用核心，ROM=\(rom.absolutePath)")
             showToast("\(info.shortName)：\(info.statusNote ?? "尚无可用核心")")
             return
         }
+
+        GSLog.tag("emu", message: "准备启动：系统=\(info.identifier) ROM=\(rom.absolutePath)")
 
         recordPlay(identifier: rom.identifier, isROM: true)
 
@@ -362,6 +365,7 @@ final class AppState: ObservableObject {
 
     /// 手动重试（例如刚在 TrollStore 里开完 JIT）
     func retryEmulatorStart() {
+        GSLog.tag("emu", message: "手动重试启动模拟器")
         emulatorStartFailure = nil
         startEmulator()
     }
@@ -370,16 +374,21 @@ final class AppState: ObservableObject {
         guard let session = emulatorSession else { return }
         do {
             try session.start()
+            GSLog.tag("emu", message: "模拟器已启动：系统=\(session.systemInfo.identifier) 核心=\(session.core?.coreName ?? "未知")")
             #if os(iOS)
             audioPlayer = GSAudioPlayer(session: session)
             audioPlayer?.start()
             #endif
         } catch {
+            GSLog.tag("emu", message: "模拟器启动失败：\(session.systemInfo.identifier) - \(error.localizedDescription)")
             emulatorStartFailure = error.localizedDescription
         }
     }
 
     func stopPlayingROM() {
+        if emulatorSession != nil {
+            GSLog.tag("emu", message: "关闭模拟器：系统=\(emulatorSession?.systemInfo.identifier ?? "?")")
+        }
         #if os(iOS)
         audioPlayer?.stop()
         audioPlayer = nil

@@ -15,6 +15,9 @@
 #import "GSCoverFetcher.h"
 #import "GSKeyMapping.h"
 
+// 日志
+#import "GSLog.h"
+
 // 模拟器 / ROM 相关（GSMGBACore.m 由主 target 直接编译，不给 Swift 暴露任何东西）
 #import "GSSystem.h"
 #import "GSROMLibrary.h"

@@ -69,7 +69,7 @@
 | **「游戏库」方块行**（URL 条目 + 模拟器 ROM 混排，一行横向滚动） | ✅ 已实现 | `HomeView.LibraryTileRow` + `LibraryItem.swift` |
 | **URL 条目导入本地图标**（「添加」里选图片，写入沙盒 `Documents/Icons/`） | ✅ 已实现 | `AddGameForm.swift` + `GSIconStore` |
 | **模拟器 ROM 自动抓取官方封面**（libretro-thumbnails `Named_Boxarts`，命中即缓存到 `Documents/Covers/`） | ⚠️ 待实机验证（联网抓取，本机无 iOS SDK，端到端未验证） | `GSCoverFetcher` + `AppState.refreshROMCovers` |
-| **设置页：三端键位**（触屏 / 键盘 / 手柄；改完即生效并持久化）；**触屏按系统分别配置**（先选系统，再调缩放 / 透明度 / 按键簇显隐） | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
+| **设置页：三端键位**（触屏 / 键盘 / 手柄；改完即生效并持久化）；**三端都按系统分别配置** —— 先选系统，触屏调缩放 / 透明度 / 按键簇显隐，键盘 / 手柄各系统各绑一套 | ✅ 已实现 | `SettingsView.swift` + `GSKeyMapping` |
 | **设置页：触屏布局编辑器**（**每个系统一套独立布局**；拖拽移动每一簇、双指或滑杆调整大小；入口**只在设置页**，游玩界面不可编辑） | ✅ 已实现 | `TouchLayoutEditor.swift` + `VirtualControls.swift` + `GSKeyMapping` |
 | 模拟器内三端按键转发（触屏虚拟手柄 + 硬件键盘 + 手柄 → 单一 `GSButton` 位掩码 → 核心） | ✅ 已实现 | `EmulatorInputCoordinator.swift` + `KeyboardCapture.swift` + `GSInputManager` |
 | 深链 `gameshell://home / open / play`（`search` 已移除，收到时提示） | ✅ 已实现 | `GSGameLauncher.m` + `GameshellApp.swift` + `AppState.handle(url:)` |
