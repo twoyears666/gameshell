@@ -119,6 +119,8 @@ static const double kGSMelondsDefaultFPS = 32.0 * 1024.0 * 1024.0 / 560190.0;
                       device:(unsigned)device
                        index:(unsigned)index
                         ident:(unsigned)ident;
+/// 本会话是否只跑固件菜单（「DS 主界面」入口）—— 同上，供 C 回调判定
+- (BOOL)wantsFirmwareMenu;
 
 @end
 
@@ -153,9 +155,11 @@ static bool gs_retro_lookup_variable(struct retro_variable *variable) {
         //   1) 用户自己选了「先过固件」（且真的导入了 firmware.bin）；
         //   2) 本会话就是「进入 DS 主界面」入口（没有卡，不关直启就只会黑屏）。
         // 缺 firmware.bin 时一律直启：核心只能合成假固件，走固件菜单会在里面打转。
+        // 注意：这里是 C 函数，拿不到 ivar，必须经方法问宿主
+        GSMelonDSCore *host = sHost;
         GSNDSSupport *support = [GSNDSSupport shared];
         BOOL hasFirmware = [support hasBIOSFileNamed: GSBiosFileNameFirmware];
-        variable->value = (hasFirmware && (_wantsFirmwareMenu || ![support bootDirectly]))
+        variable->value = (hasFirmware && ([host wantsFirmwareMenu] || ![support bootDirectly]))
             ? "disabled" : "enabled";
         return true;
     }
@@ -388,6 +392,7 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 
 - (const char *_Nullable)systemDirectoryPath { return _systemDirCString; }
 - (const char *_Nullable)saveDirectoryPath { return _saveDirCString; }
+- (BOOL)wantsFirmwareMenu { return _wantsFirmwareMenu; }
 
 #pragma mark 载入 / 卸载
 
