@@ -652,6 +652,8 @@ private struct GamepadSettingsCard: View {
 /// 导入的统一落在沙盒 Documents/Bios/ —— 核心就是去这个目录按文件名取（见 GSNDSSupport）。
 private struct NDSSettingsCard: View {
 
+    @EnvironmentObject private var state: AppState
+
     private let support = GSNDSSupport.shared()
 
     /// 每次导入 / 删除后自增，用来强制刷新「已导入 / 未导入」状态
@@ -702,6 +704,30 @@ private struct NDSSettingsCard: View {
                 pickerBlock(title: "启动方式",
                             selection: bootBinding,
                             options: [(true, "直接进游戏"), (false, "先进 DS 主界面")])
+
+                // 独立入口：不载入任何 ROM，直接跑固件菜单进 DS 系统菜单。
+                // 与上面的「启动方式」不是一回事 —— 那个管的是「开游戏时先不先进菜单」。
+                HStack(spacing: Theme.Spacing.sm) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("DS 主界面")
+                            .font(Theme.Font.body)
+                            .foregroundStyle(Theme.Color.textPrimary)
+                        Text(firmwareImported ? "直接进 DS 系统菜单，不载入任何游戏" : "先导入 firmware.bin 才能进")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Color.textTertiary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    PillButton(title: "进入", style: .primary) {
+                        state.closeSettings()
+                        state.launchDSMenu()
+                    }
+                    .frame(width: 84)
+                }
+                .opacity(firmwareImported ? 1 : 0.45)
+                .disabled(!firmwareImported)
+                .padding(.vertical, 1)
 
                 if !support.hasBIOSFile(named: GSBiosFileNameFirmware) {
                     Text("没导入 firmware.bin 时核心只能用合成固件，进不了 DS 主界面，只能直接进游戏。")
@@ -784,6 +810,11 @@ private struct NDSSettingsCard: View {
     }
 
     // MARK: 绑定
+
+    /// 有没有 firmware.bin —— 「进入 DS 主界面」这个独立入口的必要条件
+    private var firmwareImported: Bool {
+        support.hasBIOSFile(named: GSBiosFileNameFirmware)
+    }
 
     private var layoutBinding: Binding<GSNDSScreenLayout> {
         Binding(get: { screenLayout },

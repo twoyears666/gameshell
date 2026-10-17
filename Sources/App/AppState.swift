@@ -363,6 +363,34 @@ final class AppState: ObservableObject {
         startEmulator()
     }
 
+    /// 打开 NDS 固件菜单（「DS 主界面」独立入口）：不载入任何 ROM，直接进 DS 系统菜单。
+    /// 缺 firmware.bin 时如实拒绝 —— 少了它核心只能用合成固件，进不去菜单。
+    func launchDSMenu() {
+        let support = GSNDSSupport.shared()
+        guard support.hasBIOSFile(named: GSBiosFileNameFirmware) else {
+            GSLog.tag("emu", message: "启动被拒：没导入 firmware.bin，无法进 DS 主界面")
+            showToast("先在设置里导入 firmware.bin，才能进 DS 主界面")
+            return
+        }
+        guard GSEmulatorSession.hasCore(for: .systemNDS) else {
+            let info = GSSystemRegistry.info(for: .systemNDS)
+            GSLog.tag("emu", message: "启动被拒：\(info.identifier) 尚无可用核心")
+            showToast("\(info.shortName)：\(info.statusNote ?? "尚无可用核心")")
+            return
+        }
+
+        GSLog.tag("emu", message: "准备启动：NDS 固件菜单（DS 主界面）")
+
+        stopPlaying()
+        stopPlayingROM()
+
+        let session = GSEmulatorSession.dsMenu()
+        playingROM = session.rom
+        emulatorSession = session
+        emulatorStartFailure = nil
+        startEmulator()
+    }
+
     /// 手动重试（例如刚在 TrollStore 里开完 JIT）
     func retryEmulatorStart() {
         GSLog.tag("emu", message: "手动重试启动模拟器")

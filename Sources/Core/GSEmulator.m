@@ -260,6 +260,8 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     BOOL _isAvailable;
     NSString *_unavailableReason;
     BOOL _started;
+    /// 本会话只跑固件菜单、不载入任何 ROM（NDS 的「DS 主界面」入口）
+    BOOL _isFirmwareMenu;
 
     // 帧循环
     NSThread *_emulationThread;
@@ -326,6 +328,20 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         }
     }
     return self;
+}
+
++ (instancetype)dsMenuSession {
+    // 造一条虚拟 ROM 记录：只借它的 system（扩展名 .nds → GSSystemNDS）与名字，
+    // 磁盘上并没有这个文件 —— 启动时走「只跑固件菜单」那条路，不会去读它。
+    NSURL *directory = [GSROMLibrary directoryURLForSystem: GSSystemNDS];
+    NSString *absolutePath = [directory.path stringByAppendingPathComponent: @"DS 主界面.nds"];
+    GSROM *placeholder = [[GSROM alloc] initWithAbsolutePath: absolutePath
+                                                relativePath: @"nds/DS 主界面.nds"];
+    GSEmulatorSession *session = [[GSEmulatorSession alloc] initWithROM: placeholder];
+    session->_isFirmwareMenu = YES;
+    GSLogI(@"emu", @"会话创建：NDS 固件菜单（DS 主界面）核心=%@ 只跑固件、不插卡",
+           NSStringFromClass([session->_core class]));
+    return session;
 }
 
 - (void)dealloc {
@@ -458,14 +474,27 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
     _core.delegate = self;
     NSURL *saveURL = [GSROMLibrary batterySaveURLForROM: _rom];
     NSError *loadError = nil;
-    if (![_core loadROMAtPath: _rom.absolutePath savePath: saveURL.path error: &loadError]) {
-        GSLogI(@"emu", @"启动失败：核心 %@ 载入 ROM 失败 path=%@ error=%@",
-               NSStringFromClass([_core class]), _rom.absolutePath,
+    BOOL loaded = NO;
+    if (_isFirmwareMenu) {
+        // 「DS 主界面」：只跑固件菜单、不插卡。核心没实现这条入口就如实拒绝，不假装能进。
+        loaded = [_core respondsToSelector: @selector(loadFirmwareMenuWithSaveDirectory:error:)]
+              && [_core loadFirmwareMenuWithSaveDirectory: saveURL.path.stringByDeletingLastPathComponent
+                                                    error: &loadError];
+    } else {
+        loaded = [_core loadROMAtPath: _rom.absolutePath savePath: saveURL.path error: &loadError];
+    }
+    if (!loaded) {
+        GSLogI(@"emu", @"启动失败：核心 %@ 载入%@失败 path=%@ error=%@",
+               NSStringFromClass([_core class]),
+               _isFirmwareMenu ? @"固件菜单" : @"ROM",
+               _isFirmwareMenu ? saveURL.path.stringByDeletingLastPathComponent : _rom.absolutePath,
                loadError.localizedDescription ?: @"（无说明）");
         if (error) {
             *error = loadError ?: [NSError errorWithDomain: GSEmulatorErrorDomain
                                                       code: GSEmulatorErrorCodeLoadFailed
-                                                  userInfo: @{NSLocalizedDescriptionKey: @"核心无法载入这个 ROM"}];
+                                                  userInfo: @{NSLocalizedDescriptionKey:
+                                        _isFirmwareMenu ? @"核心打不开 DS 固件菜单（多半是没导入 firmware.bin）"
+                                                        : @"核心无法载入这个 ROM"}];
         }
         return NO;
     }

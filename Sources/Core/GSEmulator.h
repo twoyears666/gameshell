@@ -120,6 +120,10 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 @optional
 - (void)setTouchPoint:(CGPoint)point active:(BOOL)active NS_SWIFT_NAME(setTouchPoint(_:active:));
 
+/// 只启动固件菜单、不插卡（NDS 的「DS 主界面」独立入口）。
+/// 只有自带系统菜单的核心才实现它；宿主用 respondsToSelector: 判定。
+- (BOOL)loadFirmwareMenuWithSaveDirectory:(NSString *)saveDirectory error:(NSError **)error;
+
 /// 即时存档（可选）。只有支持存档的核心才实现这两个方法；宿主用
 /// respondsToSelector: 判定支持与否，不支持就如实告诉用户「这个核心不支持」。
 /// copySaveState 返回一份自包含的状态数据（自带尺寸信息，可直接落盘）；
@@ -136,6 +140,10 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 @interface GSEmulatorSession : NSObject
 
 - (instancetype)initWithROM:(GSROM *)rom;
+
+/// 「不载入任何 ROM、直接进固件菜单」的会话：NDS 的「DS 主界面」独立入口用。
+/// 里面的 rom 是一条虚拟记录（仅用来让界面照常显示与命名），并不对应磁盘上的文件。
++ (instancetype)dsMenuSession;
 
 @property (nonatomic, copy, readonly) GSROM *rom;
 @property (nonatomic, copy, readonly) GSSystemInfo *systemInfo;
