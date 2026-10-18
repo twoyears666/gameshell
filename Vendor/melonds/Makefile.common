@@ -2,6 +2,16 @@ MELONDS_VERSION = "0.9.3"
 
 DEFINES += -DMELONDS_VERSION=\"$(MELONDS_VERSION)\"
 
+# Gameshell 补丁：把 melonDS 自带的 teakra（namespace Teakra）整体改名。
+# 本 App 的主二进制里同时静态链接了 melonDS 与 Azahar 两个核心，两者各自带一份
+# teakra（版本不同、Teakra 类布局不一致）。链接时同名符号只会留一份实现，
+# 而 melonDS 的 DSi_DSP 是在 NDS::Init 里**无条件** new Teakra::Teakra 的
+# （DS 模式也走 DSi::Init → DSi_DSP::Init），于是这份按 melonDS 头文件布局
+# 构造的对象会被另一份实现操作 → 内存踩踏 → 一开 NDS 就闪退。
+# 这里统一 rename 这个标识符（melonDS 侧只有 src/DSi_DSP.cpp 与 teakra 自己用到它），
+# 让两边的 teakra 各归各的符号，互不干扰。
+DEFINES += -DTeakra=gsmds_Teakra
+
 INCFLAGS    := -I$(CORE_DIR)/libretro-common/include \
                -I$(CORE_DIR) \
                -I$(MELON_DIR)
