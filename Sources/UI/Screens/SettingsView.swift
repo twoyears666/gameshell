@@ -663,19 +663,17 @@ private struct NDSSettingsCard: View {
     /// 上一次导入失败的提示（没有就为 nil）
     @State private var errorText: String?
     @State private var screenLayout: GSNDSScreenLayout
-    @State private var bootDirectly: Bool
 
     /// 三个固定文件：名字必须严格叫这三个，核心才认
     private static let rows: [(name: String, title: String, note: String)] = [
         (GSBiosFileName7, "bios7.bin", "ARM7 BIOS"),
         (GSBiosFileName9, "bios9.bin", "ARM9 BIOS"),
-        (GSBiosFileNameFirmware, "firmware.bin", "固件；导入后才能进 DS 主界面"),
+        (GSBiosFileNameFirmware, "firmware.bin", "NDS 固件"),
     ]
 
     init() {
         let support = GSNDSSupport.shared()
         _screenLayout = State(initialValue: support.screenLayout)
-        _bootDirectly = State(initialValue: support.bootDirectly)
     }
 
     var body: some View {
@@ -700,41 +698,6 @@ private struct NDSSettingsCard: View {
                                       (GSNDSScreenLayout.leftRight, "左右"),
                                       (GSNDSScreenLayout.topOnly, "只上屏"),
                                       (GSNDSScreenLayout.bottomOnly, "只下屏")])
-
-                pickerBlock(title: "启动方式",
-                            selection: bootBinding,
-                            options: [(true, "直接进游戏"), (false, "先进 DS 主界面")])
-
-                // 独立入口：不载入任何 ROM，直接跑固件菜单进 DS 系统菜单。
-                // 与上面的「启动方式」不是一回事 —— 那个管的是「开游戏时先不先进菜单」。
-                HStack(spacing: Theme.Spacing.sm) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("DS 主界面")
-                            .font(Theme.Font.body)
-                            .foregroundStyle(Theme.Color.textPrimary)
-                        Text(firmwareImported ? "直接进 DS 系统菜单，不载入任何游戏" : "先导入 firmware.bin 才能进")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Color.textTertiary)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    PillButton(title: "进入", style: .primary) {
-                        state.closeSettings()
-                        state.launchDSMenu()
-                    }
-                    .frame(width: 84)
-                }
-                .opacity(firmwareImported ? 1 : 0.45)
-                .disabled(!firmwareImported)
-                .padding(.vertical, 1)
-
-                if !support.hasBIOSFile(named: GSBiosFileNameFirmware) {
-                    Text("没导入 firmware.bin 时核心只能用合成固件，进不了 DS 主界面，只能直接进游戏。")
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(Theme.Color.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
 
                 if let errorText {
                     Text(errorText)
@@ -811,24 +774,11 @@ private struct NDSSettingsCard: View {
 
     // MARK: 绑定
 
-    /// 有没有 firmware.bin —— 「进入 DS 主界面」这个独立入口的必要条件
-    private var firmwareImported: Bool {
-        support.hasBIOSFile(named: GSBiosFileNameFirmware)
-    }
-
     private var layoutBinding: Binding<GSNDSScreenLayout> {
         Binding(get: { screenLayout },
                 set: { newValue in
                     screenLayout = newValue
                     support.screenLayout = newValue
-                })
-    }
-
-    private var bootBinding: Binding<Bool> {
-        Binding(get: { bootDirectly },
-                set: { newValue in
-                    bootDirectly = newValue
-                    support.bootDirectly = newValue
                 })
     }
 

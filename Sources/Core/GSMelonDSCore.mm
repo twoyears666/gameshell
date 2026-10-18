@@ -48,11 +48,9 @@
 //  BIOS / 固件：我们不随 App 分发任何 BIOS。用户在设置页用「文件」App 把
 //  bios7.bin / bios9.bin / firmware.bin 导入到沙盒 Documents/Bios/，宿主把
 //  GET_SYSTEM_DIRECTORY 答成这个目录，核心便会按文件名去取（见 libretro.cpp 的
-//  _handle_load_game）。三件套不全时核心自动降级到 FreeBIOS + 合成固件，仍能直启进游戏；
-//  一旦导入了 firmware.bin，就把 melonds_boot_directly 答成 disabled，
-//  让核心先过一遍真固件、进 DS 主界面（见 gs_retro_lookup_variable）。
-//  「DS 主界面」另有独立入口：不载入任何 ROM、只跑固件菜单
-//  （见 loadFirmwareMenuWithSaveDirectory:error: 与 GSEmulatorSession 的 dsMenuSession）。
+//  _handle_load_game）。三件套不全时核心自动降级到 FreeBIOS + 合成固件，仍能直启进游戏。
+//  melonds_boot_directly 一律答 enabled（见 gs_retro_lookup_variable）：
+//  插了固件也直启进游戏，不走核心自带的系统菜单 —— 那条路在 iOS 上没用。
 //
 //  触摸：把 melonds_touch_mode 答成 Touch，核心便走 libretro 的 RETRO_DEVICE_POINTER
 //  （见 input.cpp 的 TouchMode::Touch 分支）。宿主经 setTouchPoint:active: 传「DS 下屏内的
@@ -119,8 +117,6 @@ static const double kGSMelondsDefaultFPS = 32.0 * 1024.0 * 1024.0 / 560190.0;
                       device:(unsigned)device
                        index:(unsigned)index
                         ident:(unsigned)ident;
-/// 本会话是否只跑固件菜单（「DS 主界面」入口）—— 同上，供 C 回调判定
-- (BOOL)wantsFirmwareMenu;
 
 @end
 
@@ -151,16 +147,12 @@ static bool gs_retro_lookup_variable(struct retro_variable *variable) {
         return true;
     }
     if (strcmp(key, "melonds_boot_directly") == 0) {
-        // 两种情况下关掉直启、先过固件进 DS 主界面：
-        //   1) 用户自己选了「先过固件」（且真的导入了 firmware.bin）；
-        //   2) 本会话就是「进入 DS 主界面」入口（没有卡，不关直启就只会黑屏）。
-        // 缺 firmware.bin 时一律直启：核心只能合成假固件，走固件菜单会在里面打转。
-        // 注意：这里是 C 函数，拿不到 ivar，必须经方法问宿主
-        GSMelonDSCore *host = sHost;
-        GSNDSSupport *support = [GSNDSSupport shared];
-        BOOL hasFirmware = [support hasBIOSFileNamed: GSBiosFileNameFirmware];
-        variable->value = (hasFirmware && ([host wantsFirmwareMenu] || ![support bootDirectly]))
-            ? "disabled" : "enabled";
+        // 一律直启：不插固件菜单那一步。
+        // 核心自带系统菜单的那条路在 iOS 上既没用又容易黑屏，宿主已去掉「先进
+        // DS 主界面」这个选项（原来还配了「DS 主界面」独立入口），这里跟着钉死。
+        // 缺 firmware.bin 时本来就是直启（核心用 FreeBIOS + 合成固件）；
+        // 有 firmware.bin 时也直启 —— 核心照旧会读固件取语言等默认值，只是不过菜单。
+        variable->value = "enabled";
         return true;
     }
     if (strcmp(key, "melonds_screen_layout") == 0) {
@@ -332,9 +324,6 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     BOOL _initialized;
     /// retro_load_game 成功、retro_unload_game 尚未调用
     BOOL _loaded;
-    /// 本会话只跑固件菜单、不插卡（NDS 的「DS 主界面」入口）。
-    /// 这期间必须把 melonds_boot_directly 答成 disabled，否则核心会拿空卡直启、停在黑屏。
-    BOOL _wantsFirmwareMenu;
 
     GSButton _buttonMask;
 
@@ -396,7 +385,6 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 
 - (const char *_Nullable)systemDirectoryPath { return _systemDirCString; }
 - (const char *_Nullable)saveDirectoryPath { return _saveDirCString; }
-- (BOOL)wantsFirmwareMenu { return _wantsFirmwareMenu; }
 
 #pragma mark 载入 / 卸载
 
@@ -404,7 +392,6 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 /// 顺序是硬要求：环境回调必须在 retro_init 之前装好
 /// （retro_init 第一件事就是问 GET_SYSTEM_DIRECTORY / GET_SAVE_DIRECTORY），
 /// 而 video / audio / input 回调只需在 retro_load_game 之前装好即可。
-/// 两条载入入口（真 ROM / 固件菜单）都必须先走这一步，别各写一遍。
 - (BOOL)prepareCoreWithSystemDirectory:(NSString *)systemDirectory
                          saveDirectory:(NSString *)saveDirectory
                               romPath:(NSString *)romPath
@@ -524,48 +511,6 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     return [self startCoreWithGame: game
                            failure: @"melonDS 认不出这个 ROM。常见原因：扩展名与实际内容不符、"
                                     @"文件损坏，或不是 .nds/.ids/.dsi 里的任何一种。"
-                             error: error];
-}
-
-/// 只启动固件菜单、不插卡（NDS 的「DS 主界面」独立入口）。
-/// 与 loadROMAtPath: 的差别只有两处：不给任何 ROM 字节（全零哑卡 + size 0，等价于没插游戏卡），
-/// 并把 melonds_boot_directly 强制答成 disabled —— 否则核心会拿空卡直启、停在黑屏。
-/// 前置条件：Documents/Bios 里得有 firmware.bin，缺固件时核心会用合成固件、
-/// 那条路进不了系统菜单，所以由上层（设置页）先把关。
-- (BOOL)loadFirmwareMenuWithSaveDirectory:(NSString *)saveDirectory error:(NSError **)error {
-    if (_initialized || _loaded) {
-        if (error) {
-            *error = [self errorWithText: @"这个核心上一次的会话还没关掉"];
-        }
-        return NO;
-    }
-
-    NSString *directory = saveDirectory.length > 0 ? saveDirectory : NSTemporaryDirectory();
-    // 路径只是给核心算 .sav 名字用的（没有卡带时并不真的读写它），
-    // 所以沿用「DS 主界面」这个名字，不会和任何真实 ROM 的存档撞车。
-    NSString *placeholderPath = [directory stringByAppendingPathComponent: @"DS 主界面.nds"];
-    NSString *systemDirectory = [GSNDSSupport biosDirectoryURL].path;
-
-    _wantsFirmwareMenu = YES;
-
-    if (![self prepareCoreWithSystemDirectory: systemDirectory
-                                saveDirectory: directory
-                                     romPath: placeholderPath
-                                       error: error]) {
-        return NO;
-    }
-
-    // 全零的哑卡：len 为 0 时核心只会把它当成「没有游戏卡」，随后转去跑固件。
-    // （这里用 unsigned char 而不是核心内部的 u8 —— 本文件没有 include melonDS 的 types.h）
-    static const unsigned char kEmptyCart[0x200] = {0};
-    struct retro_game_info game = {};
-    game.path = _romPathCString;
-    game.data = kEmptyCart;
-    game.size = 0;
-    game.meta = NULL;
-
-    return [self startCoreWithGame: game
-                           failure: @"melonDS 打不开固件菜单：请先在设置页导入 firmware.bin"
                              error: error];
 }
 

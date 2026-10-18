@@ -31,9 +31,8 @@ static NSString *const GSNDSSupportErrorDomain = @"GSNDSSupportErrorDomain";
 
 @implementation GSNDSSupport
 
-// 两个选项属性都自己实现了 getter / setter，所以这里显式接上 ivar
+// 这个选项属性自己实现了 getter / setter，所以这里显式接上 ivar
 @synthesize screenLayout = _screenLayout;
-@synthesize bootDirectly = _bootDirectly;
 
 + (instancetype)shared {
     static GSNDSSupport *shared = nil;
@@ -47,9 +46,8 @@ static NSString *const GSNDSSupportErrorDomain = @"GSNDSSupportErrorDomain";
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // 内置默认：上下双屏、直接进游戏
+        // 内置默认：上下双屏
         _screenLayout = GSNDSScreenLayoutTopBottom;
-        _bootDirectly = YES;
     }
     return self;
 }
@@ -84,12 +82,6 @@ static NSString *const GSNDSSupportErrorDomain = @"GSNDSSupportErrorDomain";
         return NO;
     }
     return [[NSFileManager defaultManager] fileExistsAtPath: [self urlForBIOSName: name].path];
-}
-
-- (BOOL)hasCompleteBIOS {
-    return [self hasBIOSFileNamed: GSBiosFileName7]
-        && [self hasBIOSFileNamed: GSBiosFileName9]
-        && [self hasBIOSFileNamed: GSBiosFileNameFirmware];
 }
 
 - (BOOL)importBIOSFileAtURL:(NSURL *)url asName:(NSString *)name error:(NSError **)error {
@@ -166,9 +158,6 @@ static NSString *const GSNDSSupportErrorDomain = @"GSNDSSupportErrorDomain";
             _screenLayout = (GSNDSScreenLayout)raw;
         }
     }
-    if (dict[@"bootDirectly"] != nil) {
-        _bootDirectly = [dict[@"bootDirectly"] boolValue];
-    }
 }
 
 - (GSNDSScreenLayout)screenLayout {
@@ -182,21 +171,9 @@ static NSString *const GSNDSSupportErrorDomain = @"GSNDSSupportErrorDomain";
     [self persist];
 }
 
-- (BOOL)bootDirectly {
-    [self loadIfNeeded];
-    return _bootDirectly;
-}
-
-- (void)setBootDirectly:(BOOL)bootDirectly {
-    [self loadIfNeeded];
-    _bootDirectly = bootDirectly;
-    [self persist];
-}
-
 - (void)persist {
     NSDictionary *dict = @{
         @"screenLayout":    @(_screenLayout),
-        @"bootDirectly":    @(_bootDirectly),
     };
     NSData *data = [NSJSONSerialization dataWithJSONObject: dict options: NSJSONWritingPrettyPrinted error: NULL];
     if (data == nil) {
@@ -216,10 +193,6 @@ static NSString *const GSNDSSupportErrorDomain = @"GSNDSSupportErrorDomain";
         case GSNDSScreenLayoutTopBottom:
         default:                            return @"Top/Bottom";
     }
-}
-
-- (NSString *)melonDSBootDirectlyValue {
-    return [self bootDirectly] ? @"enabled" : @"disabled";
 }
 
 #pragma mark - 几何换算

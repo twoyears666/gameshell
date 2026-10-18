@@ -7,15 +7,14 @@
 //  为什么 BIOS / 固件要单独导入：
 //  1) bios7.bin / bios9.bin / firmware.bin 是任天堂的版权文件，不能随 App 分发，
 //     只能由用户从自己的机器上导出，再用「文件」App 选进来；
-//  2) 没有这三件套时，melonDS 会退回内部的 FreeBIOS + 合成固件，能直接进游戏，
-//     但进不了 DS 主界面（它需要一个真实的 firmware.bin 才能跑固件菜单）；
-//  3) 有了固件后，把 melonds_boot_directly 答成 disabled，就能先过固件、进 DS 主界面。
+//  2) 没有这三件套时，melonDS 会退回内部的 FreeBIOS + 合成固件，仍能直接进游戏；
+//  3) 有 firmware.bin 时核心会读它取语言等默认值，但一律直启进游戏、不走固件菜单。
 //
 //  目录约定：Documents/Bios/{bios7.bin,bios9.bin,firmware.bin}。
 //  melonDS 的 libretro 核心会去 GET_SYSTEM_DIRECTORY（我们答这个目录）下按文件名找它们，
 //  所以文件名必须严格叫这三个。
 //
-//  运行选项（双屏布局 / 启动方式 / JIT 加速）持久化在 Documents/nds.json。
+//  运行选项（双屏布局 / JIT 加速）持久化在 Documents/nds.json。
 //
 
 #import <Foundation/Foundation.h>
@@ -48,8 +47,6 @@ FOUNDATION_EXPORT NSString *const GSBiosFileNameFirmware; // firmware.bin
 
 /// Documents/Bios（不存在会自动创建）
 + (NSURL *)biosDirectoryURL;
-/// 三个文件是否都在（只有齐全才算「能进固件菜单」）
-- (BOOL)hasCompleteBIOS NS_SWIFT_NAME(hasCompleteBIOS());
 /// 某个固定名的文件是否存在
 - (BOOL)hasBIOSFileNamed:(NSString *)name NS_SWIFT_NAME(hasBIOSFile(named:));
 /// 把用户选中的文件复制进 Documents/Bios/ 并改名成 name（name 只允许上面三个常量）
@@ -62,11 +59,10 @@ FOUNDATION_EXPORT NSString *const GSBiosFileNameFirmware; // firmware.bin
 
 /// 双屏布局（默认上下）
 @property (nonatomic, assign) GSNDSScreenLayout screenLayout NS_SWIFT_NAME(screenLayout);
-/// 启动时直接进游戏（YES，默认）还是先过固件、进 DS 主界面（NO）
-@property (nonatomic, assign) BOOL bootDirectly NS_SWIFT_NAME(bootDirectly);
 
 /// 说明：JIT 不设开关 —— 进程拿得到可执行内存就用（快），拿不到就退回解释器（慢但能跑），
 /// 由胶水层按 GSJIT.probeStatus 自动决定，用户不需要操心。
+/// 启动方式也不设开关 —— 一律直启进游戏，不走固件菜单。
 
 - (void)persist;
 
@@ -74,8 +70,6 @@ FOUNDATION_EXPORT NSString *const GSBiosFileNameFirmware; // firmware.bin
 
 /// 答给核心 melonds_screen_layout 的字符串
 - (NSString *)melonDSScreenLayoutValue;
-/// 答给核心 melonds_boot_directly 的字符串（"enabled" / "disabled"）
-- (NSString *)melonDSBootDirectlyValue;
 
 /// 某布局下核心渲染缓冲的像素尺寸（无边框间隙，gap 恒为 0）
 + (CGSize)bufferSizeForLayout:(GSNDSScreenLayout)layout;
