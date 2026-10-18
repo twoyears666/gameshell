@@ -25,7 +25,7 @@ struct EmulatorView: View {
     @StateObject private var frames = EmulatorFrameSource()
     @StateObject private var input = EmulatorInputCoordinator()
     @State private var isPaused = false
-    /// 速度档位下标（对应 Self.speedOptions）
+    /// 速度档位下标（对应 speedOptions；初始 1 = 1×）
     @State private var speedIndex = 1
     /// 快照面板是否打开
     @State private var snapshotOpen = false
@@ -214,12 +214,22 @@ struct EmulatorView: View {
 
     // MARK: - 速度
 
-    /// 速度档位（循环切换）。只改会话的 emulationSpeed：核心帧率本身不动，
-    /// 宿主靠改帧节奏实现快慢；> 1× 时会话侧自动静音（见 GSEmulator.m 的注释）。
-    private static let speedOptions: [Double] = [0.5, 1, 2, 4]
+    /// 速度档位（循环切换）。上限按 JIT 有无区分 —— 参考 Delta 的实测数值：
+    /// 没拿到 JIT 时设备撑不住更高倍速（上限 1.5×），拿到 JIT 后最高 3×。
+    /// 只改会话的 emulationSpeed：核心帧率本身不动，宿主靠改帧节奏实现快慢；
+    /// > 1× 时会话侧自动静音（见 GSEmulator.m 的注释）。
+    private var speedOptions: [Double] {
+        GSJIT.probeStatus() == .enabled ? [0.5, 1, 1.5, 2, 3] : [0.5, 1, 1.5]
+    }
+
+    /// 当前倍速。speedIndex 可能在游玩中途因 JIT 状态变化而越界（档位变短），这里夹取一次。
+    private var currentSpeed: Double {
+        let options = speedOptions
+        return options[min(speedIndex, options.count - 1)]
+    }
 
     private var speedLabel: String {
-        let value = Self.speedOptions[speedIndex]
+        let value = currentSpeed
         return value == floor(value) ? "\(Int(value))×" : String(format: "%.1f×", value)
     }
 
@@ -241,8 +251,9 @@ struct EmulatorView: View {
     }
 
     private func cycleSpeed() {
-        speedIndex = (speedIndex + 1) % Self.speedOptions.count
-        state.emulatorSession?.emulationSpeed = Self.speedOptions[speedIndex]
+        let options = speedOptions
+        speedIndex = (min(speedIndex, options.count - 1) + 1) % options.count
+        state.emulatorSession?.emulationSpeed = options[speedIndex]
     }
 
     // MARK: - 快照
