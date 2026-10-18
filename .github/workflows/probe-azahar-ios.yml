@@ -64,6 +64,51 @@ jobs:
           grep -nE 'add_library|OUTPUT_NAME|SHARED|STATIC|IOS|PLATFORM_LIBRARIES|exported_symbols' \
             azahar/src/citra_libretro/CMakeLists.txt | head -60 || true
 
+      - name: 消除 Vulkan-Hpp 的 std::format 依赖（为 iOS 16.0 铺路）
+        run: |
+          set -uo pipefail
+          # 根因（第三/四轮探路挖出来的）：
+          #   externals/vulkan-headers/include/vulkan/vulkan_to_string.hpp 里的 toHexString
+          #   是个普通 inline 函数，所以每个包含该头的 TU 都会实例化 std::format("{:x}", value)。
+          #   libc++ 的 std::format 内部走 std::vformat（运行期格式串），必须为「所有内建类型」
+          #   实例化 formatter —— 包括浮点 —— 而浮点 to_chars 被 libc++ 标成
+          #   「introduced in iOS 16.3」。于是部署目标 <16.3 时直接硬报错：
+          #     'to_chars' is unavailable: introduced in iOS 16.3
+          #   注意：to_chars（浮点）在 libc++ 里是 _LIBCPP_EXPORTED_FROM_ABI（外置符号），
+          #   所以「用 _LIBCPP_DISABLE_AVAILABILITY 让它编过」只是把编译错误变成运行期隐患
+          #   （iOS 16.0 上系统 libc++ 没这个符号）——必须从源头不实例化它，不能靠压注解。
+          # 做法：该文件里 std::format 只此一处（已逐行核对）。把它的分支改成 sstream 实现，
+          #   输出等价（十六进制小写）。同时保证 <sstream> 一定被 include（原本只在
+          #   !__cpp_lib_format 时才 include，而 Apple libc++ 是定义了 __cpp_lib_format 的）。
+          F="azahar/externals/vulkan-headers/include/vulkan/vulkan_to_string.hpp"
+          echo "---- 补丁前：__cpp_lib_format / std::format / sstream 的出现位置 ----"
+          grep -nE '__cpp_lib_format|std::format|include <sstream>' "$F" || true
+          python3 - "$F" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
+
+          old = '#if __cpp_lib_format\n    return std::format( "{:x}", value );\n'
+          new = '#if 0  // Gameshell 补丁：不走 std::format（libc++ 会拉起浮点 to_chars，要求 iOS 16.3+）\n    return std::format( "{:x}", value );\n'
+          assert old in text, "toHexString 的 std::format 段没找到（Vulkan-Headers 版本可能变了）"
+          text = text.replace(old, new, 1)
+
+          anchor = '#    include <format>  // std::format\n'
+          assert anchor in text, "找不到 <format> 的 include 行"
+          text = text.replace(
+              anchor,
+              anchor + '#    include <sstream>  // Gameshell 补丁：给 toHexString 的 sstream 分支用\n',
+              1,
+          )
+
+          path.write_text(text)
+          print("已打补丁：", path)
+          PY
+          echo "---- 补丁后：应看到被注释掉的分支 + 新增的 <sstream> include ----"
+          grep -nE '__cpp_lib_format|std::format|include <sstream>|Gameshell 补丁' "$F" || true
+
       - name: 用 iOS 交叉编译参数配置 Azahar（libretro 核心）
         run: |
           set -uo pipefail
@@ -84,12 +129,13 @@ jobs:
           #   ENABLE_LIBRETRO=ON —— 会自动强制关掉 SDL2/Qt/WebService/Scripting/GDBStub/
           #     OpenAL/Cubeb/libusb/FFmpeg（见根 CMakeLists 的 libretro 冲突处理）
           #   ENABLE_LTO=OFF —— 探路阶段关掉，快且少踩 LTO 的坑
-          #   CMAKE_OSX_DEPLOYMENT_TARGET=16.3 —— 第三轮探路踩出来的硬性下限。
-          #     Azahar 根 CMakeLists 里那段「iOS 最低 14.0」被 `if (APPLE AND NOT ENABLE_LIBRETRO)`
-          #     包着，libretro 模式下根本不执行，所以这里的值就是我们定的、也是生效值（16.0 时
-          #     编译到 84% 挂在 src/video_core：预编译头 common_precompiled_headers.h → <chrono> →
-          #     libc++ C++20 格式化实例化浮点 to_chars，而它标注「introduced in iOS 16.3」）。
-          #     抬到 16.3 即可越过。注意：这意味着核心的编译下限是 16.3（宿主 App 当前是 16.0）。
+          #   CMAKE_OSX_DEPLOYMENT_TARGET=16.0 —— 与宿主 App 最低版本对齐（让 3DS 也支持 16.0）。
+          #     第三轮探路曾在 16.0 挂到 84%，唯一报错是
+          #     「'to_chars' is unavailable: introduced in iOS 16.3」。
+          #     第四轮抬到 16.3 编通了，但那会把核心的编译下限抬到 16.3，不符合本轮目标。
+          #     本轮把真正的根因消除掉（见上一步「给 Vulkan-Hpp 打补丁」），部署目标回到 16.0。
+          #     注：Azahar 根 CMakeLists 里那段「iOS 最低 14.0」被 `if (APPLE AND NOT ENABLE_LIBRETRO)`
+          #     包着，libretro 模式下根本不执行，所以这里传的值就是生效值。
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           CC=$(xcrun --sdk iphoneos --find clang)
           CXX=$(xcrun --sdk iphoneos --find clang++)
@@ -98,7 +144,7 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_OBJC_COMPILER="$CC" \
