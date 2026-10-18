@@ -84,6 +84,12 @@ jobs:
           #   ENABLE_LIBRETRO=ON —— 会自动强制关掉 SDL2/Qt/WebService/Scripting/GDBStub/
           #     OpenAL/Cubeb/libusb/FFmpeg（见根 CMakeLists 的 libretro 冲突处理）
           #   ENABLE_LTO=OFF —— 探路阶段关掉，快且少踩 LTO 的坑
+          #   CMAKE_OSX_DEPLOYMENT_TARGET=16.3 —— 第三轮探路踩出来的硬性下限。
+          #     Azahar 根 CMakeLists 里那段「iOS 最低 14.0」被 `if (APPLE AND NOT ENABLE_LIBRETRO)`
+          #     包着，libretro 模式下根本不执行，所以这里的值就是我们定的、也是生效值（16.0 时
+          #     编译到 84% 挂在 src/video_core：预编译头 common_precompiled_headers.h → <chrono> →
+          #     libc++ C++20 格式化实例化浮点 to_chars，而它标注「introduced in iOS 16.3」）。
+          #     抬到 16.3 即可越过。注意：这意味着核心的编译下限是 16.3（宿主 App 当前是 16.0）。
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           CC=$(xcrun --sdk iphoneos --find clang)
           CXX=$(xcrun --sdk iphoneos --find clang++)
@@ -92,7 +98,7 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3 \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_OBJC_COMPILER="$CC" \
@@ -111,6 +117,8 @@ jobs:
           echo "---- 配置结果里的关键 STATUS 行 ----"
           grep -E 'MoltenVK|Vulkan|OpenGL|LibRetro|libretro|Configuring done|Generating done' \
             probe-configure.log | tail -40 || true
+          echo "---- 生效的部署目标 / 架构 / 平台（期望 16.3 / arm64 / iOS）----"
+          grep -nE 'CMAKE_OSX_DEPLOYMENT_TARGET|CMAKE_OSX_ARCHITECTURES|CMAKE_SYSTEM_NAME' build/CMakeCache.txt 2>/dev/null || echo "(CMakeCache 里没有这几项)"
           echo "---- libressl 垫片开关（期望两个都落在 0）----"
           grep -nE 'HAVE_SYSLOG_R|HAVE_EXPLICIT_BZERO' build/CMakeCache.txt 2>/dev/null || echo "(CMakeCache 里没有这两个变量)"
           echo "---- 若这两项检测真跑过，应能看到它们的真实结论 ----"
@@ -157,6 +165,13 @@ jobs:
           tail -n 60 probe-configure.log 2>/dev/null || echo "(没有 probe-configure.log)"
           echo "==== 编译日志尾部 ===="
           tail -n 80 probe-build.log 2>/dev/null || echo "(没有 probe-build.log)"
+          echo "==== 错误行去重汇总（按报错类型归类，每类取 8 条）===="
+          grep -oE "error: [^\"]*" probe-build.log 2>/dev/null \
+            | sed -E 's/[0-9]+/N/g' | sort | uniq -c | sort -rn | head -30 \
+            || echo "(没有 error 行)"
+          echo "==== 若有 availability 报错，单列出来 ===="
+          grep -nE 'is unavailable|introduced in iOS' probe-build.log 2>/dev/null | head -10 \
+            || echo "(没有 availability 类报错)"
 
       - name: 上传 Azahar 探路日志
         if: always()
