@@ -32,14 +32,20 @@
 //  libretro 的 audio_sample_batch 契约里 frames 的单位是**立体声帧**，
 //  换算成宿主协议（count = int16 总数）要乘 2。
 //
-//  系统文件 / 存档目录（关键，与 melonDS 不同）：
+//  用户目录 / 存档（与 melonDS 不同）：
 //  Azahar 在 libretro 模式下把「用户目录」设成 <GET_SAVE_DIRECTORY>/Azahar/
-//  （见 core_settings.cpp 的 ParseStorageOptions），它就在这个目录下找
-//  sysdata / nand / sdmc 这些 3DS 系统文件、也把游戏存档写在这里。
+//  （见 core_settings.cpp 的 ParseStorageOptions），存档（nand / sdmc）写在那里。
 //  所以宿主把 GET_SYSTEM_DIRECTORY 与 GET_SAVE_DIRECTORY 都答成 Documents/Bios，
 //  于是用户目录落在 Documents/Bios/Azahar/ —— 与 NDS 的 BIOS 目录同源、一目了然。
-//  没有 3DS 系统文件（sysdata）时核心会报「unable to locate a 3DS system archive」并拒绝载入，
-//  这是核心的真实行为，宿主如实把它转成启动失败提示，不假装能玩。
+//
+//  3DS 不需要用户自备 BIOS / 系统固件 —— 这点与 NDS 完全不同。
+//  上游把系统档案（shared font、Mii data、国家列表、违禁词表）的开源替代品直接编进了二进制，
+//  缺文件时从内存装载（见 file_sys/archive_ncch.cpp 的 "Loading open source replacement
+//  from memory"），所以普通（未加密）ROM 不需要任何额外文件就能启动。
+//  唯一可能要用到的是密钥文件 aes_keys.txt：只有**加密** ROM 才需要它，放
+//  <用户目录>/sysdata/aes_keys.txt（即 Documents/Bios/Azahar/sysdata/aes_keys.txt，
+//  见 hw/aes/key.cpp 用 UserPath::SysDataDir + KEYS_FILE 拼路径）。
+//  没有它时核心不会「拒绝启动」，而是在读加密内容那一步报「必须先解密」（见 loadROM 的错误文案）。
 //
 //  JIT：Azahar 是双模式 —— dynarmic（CPU JIT）与 FastInterp 解释器都编进了库里
 //  （arm/dynarmic/arm_dynarmic.cpp 与 arm/fastinterp 都在 citra_core 的目标里）。
@@ -440,8 +446,8 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     }
 
     // system / save 目录都给 Documents/Bios：
-    //   核心据此把用户目录设成 Documents/Bios/Azahar/，
-    //   3DS 系统文件（sysdata / nand）与游戏存档都落在那里（见文件头「系统文件 / 存档目录」）。
+    //   核心据此把用户目录设成 Documents/Bios/Azahar/（存档 nand/sdmc 落在那儿；
+    //   加密 ROM 要用的 aes_keys.txt 也放那儿，见文件头「用户目录 / 存档」一节）。
     NSString *systemDirectory = [GSNDSSupport biosDirectoryURL].path;
 
     if (![self prepareCoreWithSystemDirectory: systemDirectory
@@ -460,9 +466,9 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     if (!retro_load_game(&game)) {
         if (error) {
             *error = [self errorWithText:
-                @"Azahar 没能载入这个 ROM。常见原因：扩展名与实际内容不符、文件损坏、"
-                 @"ROM 是加密的（需先解密），或缺少 3DS 系统文件 —— "
-                 @"Azahar 需要 Documents/Bios/Azahar/ 下有 sysdata（3DS 系统档案）才能启动游戏。"];
+                @"Azahar 没能载入这个 ROM。常见原因：扩展名与实际内容不符、文件损坏，"
+                 @"或这是加密 ROM —— 核心要求「先解密」；要么自己解成 .3ds / .cia，"
+                 @"要么把密钥文件 aes_keys.txt 放到 Documents/Bios/Azahar/sysdata/ 下让核心来解。"];
         }
         [self teardownCore];
         return NO;

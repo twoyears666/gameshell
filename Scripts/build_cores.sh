@@ -388,7 +388,10 @@ PY
 	# 无 JIT 的设备由宿主答 disabled（见 GSAzaharCore.mm 的 gs_retro_lookup_variable），
 	# 核心于是按 use_fastinterp 退回 FastInterp 解释器 —— 双模式，不拒绝启动。
 	# 注意 use_shader_jit 不动：那是给硬件着色器用的，我们走软件渲染，没有它的事。
-	python3 - "$src_dir/src/citra_libretro/core_settings.cpp" <<'PY' >> "$configure_log" 2>&1
+	# 上游是未钉版本的 master，core_settings.cpp 随时可能改样；
+	# 补丁靠三段 assert 定位，对不上就说明「有 JIT 一定用 JIT」这条断了，
+	# 必须让整段 Azahar 构建失败（GS_HAVE_AZAHAR 变 0），而不是静默编出一个只走解释器的核心。
+	if ! python3 - "$src_dir/src/citra_libretro/core_settings.cpp" <<'PY' >> "$configure_log" 2>&1
 import pathlib
 import sys
 
@@ -433,6 +436,11 @@ text = text.replace(old_parse, new_parse, 1)
 path.write_text(text)
 print("已放开 Azahar 的 CPU JIT：", path)
 PY
+	then
+		log "放开 CPU JIT 失败：core_settings.cpp 的补丁段没对上（上游可能改过），详情见 ${configure_log}"
+		return 1
+	fi
+	log "已放开 Azahar 的 CPU JIT：citra_use_cpu_jit 在 iOS 上不再被硬写成 false"
 
 	log "配置 Azahar（交叉编译到 iOS arm64，日志：${configure_log}）"
 	cmake -S "$src_dir" -B "$build_dir" \
