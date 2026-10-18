@@ -39,7 +39,7 @@ struct ImportROMSheet: View {
                 .font(Theme.Font.section)
                 .foregroundStyle(Theme.Color.textPrimary)
 
-            Text("App 不内置任何 ROM。选中的文件会复制到 App 沙盒的 Documents/ROMs/<系统>/（重名自动加序号，不覆盖已有文件）。\nNDS / 3DS / Wii / Wii U 的核心还没接入，导进来的 ROM 会先待在库里，等核心接上再能启动。")
+            Text("App 不内置任何 ROM。选中的文件会复制到 App 沙盒的 Documents/ROMs/<系统>/（重名自动加序号，不覆盖已有文件）。\n\(Self.pendingCoreNote)")
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.Color.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -72,6 +72,17 @@ struct ImportROMSheet: View {
             onClose()
         }
         .frame(width: 0, height: 0)
+    }
+
+    /// 还没接入核心的系统。从注册表实时算，不写死 —— 写死会随接入进度过期
+    /// （比如 NDS 已接入后，这里还挂着 NDS 就不对了）。
+    private static var pendingCoreNote: String {
+        let pending = GSSystemRegistry.allSystems().filter { !$0.coreIntegrated }
+        guard !pending.isEmpty else {
+            return "所有系统的核心都已接入。"
+        }
+        let names = pending.map(\.shortName).joined(separator: " / ")
+        return "\(names) 的核心还没接入，导进来的 ROM 会先待在库里，等核心接上再能启动。"
     }
 }
 
