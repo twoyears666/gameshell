@@ -457,6 +457,14 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         _systemInfo.shortName, NSBundle.mainBundle.bundleIdentifier ?: @"本 App"];
 }
 
+- (nullable NSString *)cpuBackendDescription {
+    // 双模式核心（NDS / 3DS）才实现这个可选能力；没实现就返回 nil，界面不显示这一栏
+    if ([_core respondsToSelector: @selector(cpuBackendDescription)]) {
+        return [_core cpuBackendDescription];
+    }
+    return nil;
+}
+
 #pragma mark 启停
 
 - (BOOL)startWithError:(NSError **)error {

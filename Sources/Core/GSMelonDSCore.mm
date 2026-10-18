@@ -387,6 +387,10 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 - (size_t)videoHeight { return _videoHeight; }
 // JIT 是「能用就用、用不了退回解释器」，所以不把它当作启动硬条件
 - (BOOL)requiresJIT { return NO; }
+// 界面如实标注当前实际跑在哪一档：与 melonds_jit_enable 的作答同一依据
+- (nullable NSString *)cpuBackendDescription {
+    return ([GSJIT probeStatus] == GSJITStatusEnabled) ? @"ARM64 JIT" : @"解释器";
+}
 
 #pragma mark 给 C 回调用的小接口
 

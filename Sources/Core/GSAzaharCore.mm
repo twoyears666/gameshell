@@ -41,10 +41,14 @@
 //  没有 3DS 系统文件（sysdata）时核心会报「unable to locate a 3DS system archive」并拒绝载入，
 //  这是核心的真实行为，宿主如实把它转成启动失败提示，不假装能玩。
 //
-//  JIT：iOS 上 Azahar 明确走解释器 —— core_settings.cpp 的 ParseCpuOptions 在 #ifdef IOS
-//  下把 use_cpu_jit 硬写成 false、use_fastinterp 默认 enabled。所以 3DS 在 iOS 不需要 JIT，
-//  也正好解释了为什么 requiresJIT 返回 NO。GET_JIT_CAPABLE 仍如实按 GSJIT 探测结果作答，
-//  以备将来核心在 iOS 上放开 JIT。
+//  JIT：Azahar 是双模式 —— dynarmic（CPU JIT）与 FastInterp 解释器都编进了库里
+//  （arm/dynarmic/arm_dynarmic.cpp 与 arm/fastinterp 都在 citra_core 的目标里）。
+//  上游本来在 iOS 上把 use_cpu_jit 硬写成 false，构建脚本会给 core_settings.cpp 打补丁
+//  把这一处放开（见 Scripts/build_cores.sh 的 build_azahar_core）。于是：
+//    · 设备拿得到可执行内存（GSJIT 探测 = enabled）→ 本文件答 citra_use_cpu_jit=enabled，走 JIT；
+//    · 拿不到 → 答 disabled，核心按 use_fastinterp 退回 FastInterp 解释器。
+//  「有 JIT 就一定用 JIT」，无 JIT 也不拒绝启动 —— 所以 requiresJIT 返回 NO，
+//  界面改用 cpuBackendDescription 如实标注当前实际跑在哪一档。
 //
 //  符号前缀：本文件必须在 libretro.h 之前 include gs_azahar_symbol_prefix.h ——
 //  原因见该文件顶部注释（同一 App 里还静态链接了 Mesen-S 与 melonDS 两个 libretro 核心）。
@@ -159,6 +163,12 @@ static bool gs_retro_lookup_variable(struct retro_variable *variable) {
         variable->value = "default";
         return true;
     }
+    if (strcmp(key, "citra_use_cpu_jit") == 0 || strcmp(key, "azahar_use_cpu_jit") == 0) {
+        // 「有 JIT 就一定用 JIT」：只有设备真拿得到可执行内存才答 enabled（走 dynarmic）。
+        // 答 disabled 时核心会按 use_fastinterp 退回 FastInterp 解释器，不会拒绝启动。
+        variable->value = ([GSJIT probeStatus] == GSJITStatusEnabled) ? "enabled" : "disabled";
+        return true;
+    }
 
     // 特别注意：核心会对某些选项做 std::stoi（resolution_factor / cpu_clock_percentage /
     // factor_3d / analog_deadzone），一旦我们返回 true 却给不出字符串就会炸。
@@ -233,8 +243,8 @@ static bool gs_retro_environment(unsigned cmd, void *data) {
             return true;
 
         case RETRO_ENVIRONMENT_GET_JIT_CAPABLE: {
-            // iOS 上核心虽然硬走解释器（use_cpu_jit = false），这里仍如实作答，
-            // 以备将来核心在 iOS 上放开 JIT
+            // 如实回答本进程能不能拿到可执行内存。
+            // citra_use_cpu_jit 按同一探测结果作答，所以这里答 true 就意味着真的会走 JIT。
             if (data == NULL) {
                 return false;
             }
@@ -357,8 +367,12 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
 - (double)framesPerSecond { return _fps; }
 - (size_t)videoWidth { return _videoWidth; }
 - (size_t)videoHeight { return _videoHeight; }
-// iOS 上 Azahar 的 use_cpu_jit 被核心硬写成 false（走 FastInterp 解释器），不依赖 JIT
+// 双模式：有 JIT 走 dynarmic，没有就退回 FastInterp 解释器 —— 不拒绝启动，只是速度不同
 - (BOOL)requiresJIT { return NO; }
+// 界面如实标注当前实际跑在哪一档（与 gs_retro_lookup_variable 答 citra_use_cpu_jit 同一依据）
+- (nullable NSString *)cpuBackendDescription {
+    return ([GSJIT probeStatus] == GSJITStatusEnabled) ? @"dynarmic JIT" : @"FastInterp 解释器";
+}
 
 #pragma mark 给 C 回调用的小接口
 

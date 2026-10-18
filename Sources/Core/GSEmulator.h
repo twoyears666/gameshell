@@ -101,7 +101,8 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 /// 视频输出尺寸（载入 ROM 后才有效）
 @property (nonatomic, assign, readonly) size_t videoWidth;
 @property (nonatomic, assign, readonly) size_t videoHeight;
-/// 该平台是否必须开 JIT（Wii / 3DS / Wii U 为 YES）
+/// 该平台是否必须开 JIT 才能启动（目前只有 Wii / Wii U 为 YES；
+/// 3DS 与 NDS 都是双模式：有 JIT 就用 JIT，没有就降级解释器，不拒绝启动）
 @property (nonatomic, assign, readonly) BOOL requiresJIT;
 
 /// 载入 ROM；savePath 是电池存档（.sav）的路径，由核心自行读写
@@ -115,9 +116,14 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 
 - (void)shutdown;
 
+@optional
+/// 当前实际生效的 CPU 后端描述（如 "dynarmic JIT" / "FastInterp 解释器"）。
+/// 只有「JIT 与解释器双模式」的核心才实现它，宿主用 respondsToSelector: 判定，
+/// 界面据此如实标注当前跑在哪一档。
+@property (nonatomic, copy, readonly, nullable) NSString *cpuBackendDescription;
+
 /// 触摸屏（NDS 下屏等）。point 是触摸区内的归一化坐标（0–1，原点在触摸区左上角），
 /// active 表示手指当前是否按下。只有支持触摸的核心才实现它。
-@optional
 - (void)setTouchPoint:(CGPoint)point active:(BOOL)active NS_SWIFT_NAME(setTouchPoint(_:active:));
 
 /// 只启动固件菜单、不插卡（NDS 的「DS 主界面」独立入口）。
@@ -160,6 +166,8 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 @property (nonatomic, assign, readonly) GSJITStatus jitStatus;
 /// 需要 JIT 但没开时给用户的提示文案；其它情况为 nil
 @property (nonatomic, copy, readonly, nullable) NSString *jitWarning;
+/// 当前实际跑在哪一档 CPU 后端，由核心如实回报（核心没有这个能力时为 nil）
+@property (nonatomic, copy, readonly, nullable) NSString *cpuBackendDescription;
 
 - (BOOL)startWithError:(NSError **)error;
 - (void)stop;

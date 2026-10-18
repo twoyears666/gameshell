@@ -570,7 +570,10 @@ struct EmulatorView: View {
     private func coreSummary(_ session: GSEmulatorSession) -> String {
         let system = session.systemInfo.shortName
         guard let core = session.core else { return system }
-        return "\(system) · \(core.coreName) \(core.coreVersion) · \(session.requiresJIT ? "需要 JIT" : "无需 JIT")"
+        // 双模式核心（NDS / 3DS）会如实回报当前实际跑在哪一档，就用那一档当说明；
+        // 单模式核心没有这个能力，退回「需要 / 无需 JIT」。
+        let tier = session.cpuBackendDescription ?? (session.requiresJIT ? "需要 JIT" : "无需 JIT")
+        return "\(system) · \(core.coreName) \(core.coreVersion) · \(tier)"
     }
 
     // MARK: - JIT 提示

@@ -379,6 +379,61 @@ path.write_text(text)
 print("已把 citra_libretro 静态化：", path)
 PY
 
+	# 放开 CPU JIT —— 「有 JIT 就一定用 JIT」。
+	# 上游在 iOS 上把 use_cpu_jit 硬写成 false（选项定义也被 #ifndef IOS 挡住），
+	# 但 Azahar 的 dynarmic 后端其实照样编了（arm/dynarmic/arm_dynarmic.cpp 在 citra_core 里），
+	# 只要设备拿得到可执行内存就该走 JIT。所以这里只改两处、不碰别的东西：
+	#   ① ParseCpuOptions 去掉 #ifdef IOS false; 分支，改成一律问前端；
+	#   ② 把 use_cpu_jit 的选项定义从 #ifndef IOS 里放出来，否则前端答了核心也不认。
+	# 无 JIT 的设备由宿主答 disabled（见 GSAzaharCore.mm 的 gs_retro_lookup_variable），
+	# 核心于是按 use_fastinterp 退回 FastInterp 解释器 —— 双模式，不拒绝启动。
+	# 注意 use_shader_jit 不动：那是给硬件着色器用的，我们走软件渲染，没有它的事。
+	python3 - "$src_dir/src/citra_libretro/core_settings.cpp" <<'PY' >> "$configure_log" 2>&1
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+
+# ① 选项定义不再对 iOS 隐藏（把 use_cpu_jit 那一项从 #ifndef IOS 里挪出来）
+old_opt = '''#ifndef IOS
+    {
+        config::cpu::use_cpu_jit,'''
+new_opt = '''    {
+        config::cpu::use_cpu_jit,'''
+assert old_opt in text, "找不到 use_cpu_jit 选项定义前的 #ifndef IOS"
+text = text.replace(old_opt, new_opt, 1)
+
+# 该选项定义以 "config::enabled\\n    },\\n#endif" 收尾，紧跟着就是 use_fastinterp 那一项，
+# 用后半段一起匹配保证只动这一处。
+old_end = '''        config::enabled
+    },
+#endif
+    {
+        config::cpu::use_fastinterp,'''
+new_end = '''        config::enabled
+    },
+    {
+        config::cpu::use_fastinterp,'''
+assert old_end in text, "找不到 use_cpu_jit 选项定义结尾的 #endif"
+text = text.replace(old_end, new_end, 1)
+
+# ② ParseCpuOptions 不再硬写 false，改成问前端
+old_parse = '''    Settings::values.use_cpu_jit =
+#ifdef IOS
+        false;
+#else
+        LibRetro::FetchVariable(config::cpu::use_cpu_jit, config::enabled) == config::enabled;
+#endif'''
+new_parse = '''    Settings::values.use_cpu_jit =
+        LibRetro::FetchVariable(config::cpu::use_cpu_jit, config::enabled) == config::enabled;'''
+assert old_parse in text, "找不到 ParseCpuOptions 里 #ifdef IOS 硬写 false 的段"
+text = text.replace(old_parse, new_parse, 1)
+
+path.write_text(text)
+print("已放开 Azahar 的 CPU JIT：", path)
+PY
+
 	log "配置 Azahar（交叉编译到 iOS arm64，日志：${configure_log}）"
 	cmake -S "$src_dir" -B "$build_dir" \
 		-DCMAKE_SYSTEM_NAME=iOS \
