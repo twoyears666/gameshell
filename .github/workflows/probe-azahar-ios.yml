@@ -1,0 +1,165 @@
+name: Probe Azahar iOS Libretro Build
+
+# 探路工作流：只回答一个问题 —— 「iOS 上到底能不能编出 Azahar 的 libretro 核心」。
+#
+# 为什么单开一条、而不是并进 build.yml：
+#   Azahar 递归子模块近 20 个（boost / dynarmic / libressl / …），一次 configure + 编译很重，
+#   不该跟着每次 push 都烧。这里 push 只在 azahar-probe 分支、且只改到本文件时触发；
+#   workflow_dispatch 供日后手动重跑。
+#
+# ⚠️ 本工作流**不接入主工程**：不改 project.yml、不动 Scripts/build_cores.sh、不碰
+#    GSBuiltCores.h。它只把 Azahar 拉到 runner 上按 iOS 交叉编译参数试编一遍，
+#    把真实日志传上来。日志是决定性证据，编不出来之前绝不假装接入。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['azahar-probe']
+    paths:
+      - '.github/workflows/probe-azahar-ios.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: 探路编译
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: 打印工具链版本（Xcode / CMake / Git）
+        run: |
+          xcodebuild -version
+          cmake --version || brew install cmake
+          git --version
+
+      - name: 克隆 Azahar 及其全部子模块
+        run: |
+          set -euo pipefail
+          git clone --recurse-submodules --jobs 8 \
+            https://github.com/azahar-emu/azahar.git azahar
+          echo "---- Azahar 顶层源码树（确认关键目录在位）----"
+          ls -la azahar | head -40
+          echo "---- libretro 前端源码目录 ----"
+          ls -la azahar/src/citra_libretro 2>/dev/null || echo "(没有 src/citra_libretro)"
+          echo "---- 三种 CPU 后端目录（dynarmic=JIT / dyncom=解释器 / fastinterp=新解释器）----"
+          ls -la azahar/src/core/arm 2>/dev/null || echo "(没有 src/core/arm)"
+          echo "---- 自带的 MoltenVK xcframework ----"
+          ls -la azahar/static/MoltenVK.xcframework 2>/dev/null || echo "(没有自带 MoltenVK.xcframework)"
+
+      - name: 打印 Azahar 的关键构建开关
+        run: |
+          set -uo pipefail
+          echo "---- 与 libretro / 图形后端 / Apple 有关的开关行 ----"
+          grep -nE 'ENABLE_LIBRETRO|ENABLE_VULKAN|ENABLE_OPENGL|MoltenVK|MOLTENVK|IOS|APPLE|CMAKE_OSX_DEPLOYMENT_TARGET' \
+            azahar/CMakeLists.txt | head -80
+          echo "---- src/CMakeLists.txt 里的前端目标 ----"
+          grep -nE 'libretro|add_library|add_executable|add_subdirectory' azahar/src/CMakeLists.txt | head -60 || true
+          echo "---- libretro 前端 CMake（目标名 / 产物形态）----"
+          grep -nE 'add_library|OUTPUT_NAME|SHARED|STATIC|IOS|PLATFORM_LIBRARIES|exported_symbols' \
+            azahar/src/citra_libretro/CMakeLists.txt | head -60 || true
+
+      - name: 用 iOS 交叉编译参数配置 Azahar（libretro 核心）
+        run: |
+          set -uo pipefail
+          # 交叉编译要点（与 Scripts/build_cores.sh 同一套）：
+          #   CMAKE_SYSTEM_NAME=iOS + OSX_SYSROOT/ARCHITECTURES/DEPLOYMENT_TARGET
+          #   各语言编译器显式指到 SDK 里的 clang（Azahar 会 enable_language(OBJC OBJCXX)，
+          #     所以 OBJC/OBJCXX 也要指，否则 cmake 挑宿主编译器、产物是 macOS 架构）
+          #   CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY —— 只编译不链接地试探编译器
+          #   ENABLE_LIBRETRO=ON —— 会自动强制关掉 SDL2/Qt/WebService/Scripting/GDBStub/
+          #     OpenAL/Cubeb/libusb/FFmpeg（见根 CMakeLists 的 libretro 冲突处理）
+          #   ENABLE_LTO=OFF —— 探路阶段关掉，快且少踩 LTO 的坑
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          CC=$(xcrun --sdk iphoneos --find clang)
+          CXX=$(xcrun --sdk iphoneos --find clang++)
+          echo "SDK=${SDK}"
+          cmake -S azahar -B build \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_OBJC_COMPILER="$CC" \
+            -DCMAKE_OBJCXX_COMPILER="$CXX" \
+            -DCMAKE_ASM_COMPILER="$CC" \
+            -DCMAKE_C_COMPILER_WORKS=1 \
+            -DCMAKE_CXX_COMPILER_WORKS=1 \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_LIBRETRO=ON \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_LTO=OFF \
+            -DCITRA_WARNINGS_AS_ERRORS=OFF \
+            2>&1 | tee probe-configure.log
+          echo "---- 配置结果里的关键 STATUS 行 ----"
+          grep -E 'MoltenVK|Vulkan|OpenGL|LibRetro|libretro|Configuring done|Generating done' \
+            probe-configure.log | tail -40 || true
+
+      - name: 列出 Azahar 的 libretro 构建目标
+        run: |
+          set -uo pipefail
+          echo "---- 全部可用目标里含 libretro / azahar 的 ----"
+          cmake --build build --target help 2>&1 | grep -iE 'libretro|azahar' | sort -u || echo "(没有明显相关的目标)"
+          echo "---- help 输出前 60 行（兜底参考）----"
+          cmake --build build --target help 2>&1 | head -60 || true
+
+      - name: 编译 Azahar libretro 核心
+        run: |
+          set -uo pipefail
+          # 目标名先探测，探不到就退回官方的 citra_libretro（azahar_libretro 是它的别名目标）
+          TARGET=$(cmake --build build --target help 2>/dev/null \
+            | grep -ioE '[a-z0-9_.-]*libretro[a-z0-9_.-]*' | sort -u | head -1)
+          echo "探测到的 libretro 目标：${TARGET:-（空，退回 citra_libretro）}"
+          [ -n "$TARGET" ] || TARGET=citra_libretro
+          echo "实际编译目标：$TARGET"
+          cmake --build build --target "$TARGET" --parallel 4 2>&1 | tee probe-build.log
+          echo "---- 编译日志尾部 ----"
+          tail -n 80 probe-build.log || true
+
+      - name: 打印 Azahar 编译产物形态（成功失败都打）
+        if: always()
+        run: |
+          set -uo pipefail
+          echo "---- 编译出的 libretro 相关产物 ----"
+          find build -type f \( -name '*libretro*' -o -name '*.dylib' -o -name '*.a' -o -name '*.so' \) \
+            -exec ls -lh {} \; 2>/dev/null | head -60 || echo "(没有找到 libretro 产物)"
+          echo "---- build/bin（若存在）----"
+          ls -laR build/bin 2>/dev/null | head -40 || echo "(没有 build/bin)"
+
+      - name: 汇总编译错误（失败时）
+        if: failure()
+        run: |
+          set -uo pipefail
+          echo "==== 配置日志尾部 ===="
+          tail -n 60 probe-configure.log 2>/dev/null || echo "(没有 probe-configure.log)"
+          echo "==== 编译日志尾部 ===="
+          tail -n 80 probe-build.log 2>/dev/null || echo "(没有 probe-build.log)"
+
+      - name: 上传 Azahar 探路日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: azahar-probe-logs
+          path: |
+            probe-configure.log
+            probe-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: 上传 Azahar libretro 核心产物（成功时）
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Azahar-iOS-Libretro
+          path: |
+            build/**/*libretro*
+            build/**/*.dylib
+          if-no-files-found: error
+          retention-days: 30
