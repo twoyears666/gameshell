@@ -25,10 +25,13 @@
 //    的根因。所以 Vendor 侧另打了兜底补丁（ARMJIT_Compiler.cpp：mmap 失败就沿用静态缓冲）。
 //  - 因此 requiresJIT 返回 NO：解释器兜底，NDS 在任何设备上都打得开，只是速度不同。
 //
-//  画面格式：核心在 retro_load_game 里要求 RETRO_PIXEL_FORMAT_XRGB8888，
-//  但 melonDS 的显示缓冲在内存里本身就是 RGBA 字节序
-//  （见 GPU2D_Soft.cpp 的 dst[i] = r | (g << 8) | (b << 16)，以及 line 末尾补 0xFF000000），
-//  所以这里**不需要**像 Mesen-S 那样交换 byte0/byte2，只把 alpha 补成不透明即可。
+//  画面格式：核心在 retro_load_game 里要求 RETRO_PIXEL_FORMAT_XRGB8888。
+//  按 libretro 的约定，XRGB8888 在小端机上的内存字节序是 B,G,R,X —— melonDS 正是照这个
+//  约定出货的：GPU2D_Soft.cpp 的 DrawScanline 末尾有一段「convert to 32-bit BGRA」的
+//  逐像素重排（r 挪到 byte2、b 挪到 byte0），所以最终缓冲在内存里是 B,G,R,A。
+//  而宿主的 CGImage 用 kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder32Big，期望内存是 R,G,B,X，
+//  因此这里必须像 Mesen-S 那样交换 byte0/byte2，再把 alpha 补成 0xFF；
+//  否则红蓝对调，人脸的肉色会显示成蓝色。
 //  行距一律用 video_refresh 回调传进来的 pitch，不假设它等于 width*4。
 //
 //  画面尺寸：随用户选的双屏布局而变 —— 上下 / 左右是 256x384 / 512x192，
@@ -627,17 +630,21 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
         _frameCapacity = needed;
     }
 
-    // melonDS 的显示缓冲本身就是 RGBA 字节序（r | g<<8 | b<<16，见 GPU2D_Soft.cpp），
-    // 所以**不需要**交换 R 与 B，只需要把 alpha 补成 0xFF 不透明。
+    // XRGB8888（内存字节序 B,G,R,X）→ RGBA8888（R,G,B,A）：换 byte0 与 byte2，A 填 0xFF。
+    // 依据见 GPU2D_Soft.cpp 的 DrawScanline 末尾「convert to 32-bit BGRA」一段。
     // 行距用核心给的 pitch，不要假设它等于 width*4。
     const uint8_t *source = (const uint8_t *)data;
     uint8_t *destination = _frameBuffer;
     for (unsigned y = 0; y < height; y++) {
         const uint8_t *sourceRow = source + (size_t)y * pitch;
         uint8_t *destinationRow = destination + (size_t)y * rowBytes;
-        memcpy(destinationRow, sourceRow, rowBytes);
         for (unsigned x = 0; x < width; x++) {
-            destinationRow[(size_t)x * 4 + 3] = 0xFF;
+            const uint8_t *pixel = sourceRow + (size_t)x * 4;
+            uint8_t *out = destinationRow + (size_t)x * 4;
+            out[0] = pixel[2];
+            out[1] = pixel[1];
+            out[2] = pixel[0];
+            out[3] = 0xFF;
         }
     }
 
