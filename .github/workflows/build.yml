@@ -24,7 +24,9 @@ jobs:
   build:
     name: 编译 iOS + macOS + 打包 IPA / tipa
     runs-on: macos-15
-    timeout-minutes: 60
+    # 核心在 Xcode 预构建阶段交叉编译：Azahar（3DS）要现克隆上游 + 编 ~20 个子模块，
+    # 是最重的一步，所以时间上限抬到 180 分钟。
+    timeout-minutes: 180
 
     steps:
       - name: 检出源码
@@ -37,7 +39,7 @@ jobs:
           cmake --version || true
 
       - name: 安装 XcodeGen 与 CMake
-        run: brew install xcodegen cmake
+        run: brew install xcodegen cmake python
 
       - name: 用 XcodeGen 生成 Gameshell.xcodeproj
         run: xcodegen generate
@@ -70,10 +72,11 @@ jobs:
           echo "---- GSBuiltCores.h ----"
           cat build/cores/iphoneos/GSBuiltCores.h 2>/dev/null || echo "(没有 GSBuiltCores.h)"
           # 每个核心一份日志：<核心名>-configure.log / <核心名>-build.log
+          # Azahar 的日志最大（含克隆 + 20 多个子模块编译），多打一些便于定位
           for log in build/cores/iphoneos/*-configure.log build/cores/iphoneos/*-build.log; do
             [ -f "$log" ] || continue
             echo "---- $log (tail) ----"
-            tail -n 60 "$log" || true
+            tail -n 120 "$log" || true
           done
 
       - name: ad-hoc 自签名 iOS App（最小 entitlements）

@@ -113,10 +113,22 @@ targets:
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/build/cores/$(PLATFORM_NAME)
         OTHER_LDFLAGS:
+          # 顺序有讲究：Azahar 与 melonDS 各自都把 libretro-common 编进自己的静态库，
+          # 两边的 file_path / file_stream / stdstring / vfs… 是同一批符号，链接器按
+          # 「命令行里先出现的库先被拉取」来解析，因此必须让 Azahar（较新的那份
+          # libretro-common）排在 melonDS 前面 —— 重叠符号由 Azahar 提供，
+          # melonDS 只会再补它独有的那几个（rthreads / glsm / memory_stream…），
+          # 从而不产生 duplicate symbol。反过来排会踩到「Azahar 需要较新函数 →
+          # 拉出重叠的对象 → 与 melonDS 的旧对象重名」。
+          - -lazahar
           - -lmgba
           - -lnestopia
           - -lmesens
           - -lmelonds
+          # Azahar 上游在 iOS 下显式链了 CoreFoundation / Foundation。
+          # 静态库不传递依赖，所以必须在 App 侧补上。
+          - -framework
+          - CoreFoundation
 
 schemes:
   Gameshell:

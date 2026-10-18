@@ -12,8 +12,10 @@
 #   Nestopia —— NES / Famicom（Vendor/nestopia，GPL-3.0）
 #   Mesen-S  —— SNES / Super Famicom（Vendor/mesens，GPL-3.0）
 #   melonDS  —— NDS / DSi（Vendor/melonds，GPL-3.0；编入 ARM64 JIT，无 JIT 时自动走解释器）
+#   Azahar   —— Nintendo 3DS（上游 azahar-emu/azahar，GPL-2.0；源码不入库，构建时现克隆现编，
+#               iOS 上走软件渲染 + 解释器，不需要 JIT）
 # 尚无源码 / 尚未接入的核心只留空壳库，由 GSBuiltCores.h 里的开关如实标成 0：
-#   · Azahar(3DS) / Dolphin(Wii) 需要 GL 硬件渲染宿主层，待立项（本轮不接，不假装接入）；
+#   · Dolphin(Wii) 需要 GL 硬件渲染宿主层，待立项（本轮不接，不假装接入）；
 #   · Wii U 核心本轮不做。
 #
 # 产物（每个平台一份，互不污染）：
@@ -47,6 +49,7 @@ have_mgba=0
 have_nestopia=0
 have_mesens=0
 have_melonds=0
+have_azahar=0
 summary=""
 
 log() { printf '[build_cores] %s\n' "$*"; }
@@ -105,13 +108,14 @@ write_header() {
 #define GS_HAVE_NESTOPIA $have_nestopia
 #define GS_HAVE_MESENS $have_mesens
 #define GS_HAVE_MELONDS $have_melonds
+#define GS_HAVE_AZAHAR $have_azahar
 
 #define GS_CORES_PLATFORM "$PLATFORM"
 #define GS_CORES_NOTE "$summary"
 
 #endif
 EOF
-	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Mesen-S=${have_mesens} melonDS=${have_melonds}）"
+	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Mesen-S=${have_mesens} melonDS=${have_melonds} Azahar=${have_azahar}）"
 }
 
 # 收尾：没编出来的核心补空壳库，然后写编译期开关头。成功编出来的核心不动（不覆盖真库）。
@@ -120,6 +124,7 @@ finalize() {
 	[ "$have_nestopia" -eq 1 ] || make_stub_library nestopia
 	[ "$have_mesens" -eq 1 ] || make_stub_library mesens
 	[ "$have_melonds" -eq 1 ] || make_stub_library melonds
+	[ "$have_azahar" -eq 1 ] || make_stub_library azahar
 	write_header
 }
 
@@ -129,6 +134,7 @@ finish_without_cores() {
 	have_nestopia=0
 	have_mesens=0
 	have_melonds=0
+	have_azahar=0
 	summary="$1"
 	finalize
 	exit 0
@@ -240,6 +246,207 @@ build_make_core() {
 
 	cp "$build_dir/$artifact" "$OUT_DIR/lib${name}.a"
 	log "完成：${OUT_DIR}/lib${name}.a（$(du -h "$OUT_DIR/lib${name}.a" | cut -f1)）"
+	return 0
+}
+
+# 交叉编译 Azahar（3DS）libretro 核心，产出一个合并好的 $OUT_DIR/libazahar.a。
+#
+# 与其它核心有两处本质不同：
+#  1) Azahar 没有 vendoring 进 Vendor/（它递归子模块近 20 个 —— boost / dynarmic /
+#     libressl / … 全量入库太重），所以这里直接在 $OUT_DIR 里
+#     git clone --recurse-submodules，构建产物不污染 Vendor/。因此这个函数需要网络。
+#  2) 绝不复用 build_cmake_core()：后者硬传 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY，
+#     会让 libressl 的 check_function_exists 全部假阳性、不启用自带 compat 垫片，
+#     进而触发 vsyslog_r / explicit_bzero 符号未定义 —— 这是探路阶段挖出来的真根因。
+#     这里保持默认（EXECUTABLE，检测真去链接），并另加两条兜底 -DHAVE_SYSLOG_R=0 /
+#     -DHAVE_EXPLICIT_BZERO=0。
+#
+# 参数口径与探路工作流（.github/workflows/probe-azahar-ios.yml，azahar-probe 分支）
+# 完全一致，那一版已在 iOS 16.0 上真实编通（CI run 全绿）。
+#
+# 产物名：Azahar 的 CMake 把 target citra_libretro 的 PREFIX 设为 ""、
+# OUTPUT_NAME 设为 azahar_libretro；把 SHARED 改成 STATIC 后产物就是 azahar_libretro.a。
+# 但它是「只含自身目标文件」的静态库，依赖的 20 多个 .a 不会自动并进去，
+# 所以最后用 libtool -static 把 build 目录下所有 .a 合并成单一 libazahar.a，
+# 让 App 只需要一条 -lazahar。
+build_azahar_core() {
+	local src_dir="$OUT_DIR/azahar-src"
+	local build_dir="$OUT_DIR/azahar-build"
+	local configure_log="$OUT_DIR/azahar-configure.log"
+	local build_log="$OUT_DIR/azahar-build.log"
+
+	rm -rf "$src_dir" "$build_dir"
+	: > "$configure_log"
+	: > "$build_log"
+
+	# 打补丁与插入符号前缀都要用 python3；缺了它整条 Azahar 段就跑不起来，
+	# 这里显式拦下（缺 python3 时 CI 应通过 brew install python 补上）。
+	if ! command -v python3 >/dev/null 2>&1; then
+		log "找不到 python3，无法给 Azahar 打补丁（CI 上应通过 brew install python 补上）"
+		return 1
+	fi
+
+	log "克隆 Azahar 及其全部子模块（日志：${configure_log}）"
+	if ! git clone --recurse-submodules --jobs 8 \
+			https://github.com/azahar-emu/azahar.git "$src_dir" >> "$configure_log" 2>&1; then
+		log "Azahar 克隆失败，详情见 ${configure_log}"
+		return 1
+	fi
+
+	# 消除 Vulkan-Hpp 的 std::format 依赖：vulkan_to_string.hpp 的 toHexString 里
+	# std::format("{:x}", value) 会拉起 libc++ 的浮点 to_chars，而它被标成
+	# 「introduced in iOS 16.3」——部署目标 16.0 时直接编译报错。该文件里 std::format
+	# 只此一处，改成等价的 sstream 实现即可从源头不实例化它。
+	# 注意：不能用 _LIBCPP_DISABLE_AVAILABILITY 压注解绕过 —— 那只是把编译错误变成
+	# iOS 16.0 上的运行期隐患（系统 libc++ 没这个外置符号）。
+	python3 - "$src_dir/externals/vulkan-headers/include/vulkan/vulkan_to_string.hpp" <<'PY' >> "$configure_log" 2>&1
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+
+old = '#if __cpp_lib_format\n    return std::format( "{:x}", value );\n'
+new = '#if 0  // Gameshell 补丁：不走 std::format（libc++ 会拉起浮点 to_chars，要求 iOS 16.3+）\n    return std::format( "{:x}", value );\n'
+assert old in text, "toHexString 的 std::format 段没找到（Vulkan-Headers 版本可能变了）"
+text = text.replace(old, new, 1)
+
+anchor = '#    include <format>  // std::format\n'
+assert anchor in text, "找不到 <format> 的 include 行"
+text = text.replace(
+    anchor,
+    anchor + '#    include <sstream>  // Gameshell 补丁：给 toHexString 的 sstream 分支用\n',
+    1,
+)
+
+path.write_text(text)
+print("已给 Vulkan-Hpp 打补丁：", path)
+PY
+
+	log "给 Azahar 打符号前缀补丁 + 静态化补丁"
+	# 入口点符号前缀：同一 App 里还静态链接了 Mesen-S 与 melonDS，retro_* 入口点会撞车。
+	# Azahar 的入口点分散在 citra_libretro.cpp 与 environment.cpp 两个翻译单元，
+	# 两处都必须在各自的 libretro.h 之前 include 前缀头。
+	# 同时放一份到 $OUT_DIR：宿主胶水 GSAzaharCore.mm 也 include 这份头，
+	# 而 $OUT_DIR 在 HEADER_SEARCH_PATHS 里（$(SRCROOT)/build/cores/$(PLATFORM_NAME)）。
+	cp "$ROOT/Scripts/azahar/gs_azahar_symbol_prefix.h" "$OUT_DIR/gs_azahar_symbol_prefix.h" >> "$configure_log" 2>&1
+	cp "$ROOT/Scripts/azahar/gs_azahar_symbol_prefix.h" \
+		"$src_dir/src/citra_libretro/gs_azahar_symbol_prefix.h" >> "$configure_log" 2>&1
+	for f in "$src_dir/src/citra_libretro/citra_libretro.cpp" \
+			"$src_dir/src/citra_libretro/environment.cpp"; do
+		python3 - "$f" <<'PY' >> "$configure_log" 2>&1
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+header = '#include "gs_azahar_symbol_prefix.h"  // Gameshell 补丁：把 retro_* 入口点改名，避免与其它核心撞车\n'
+if 'gs_azahar_symbol_prefix.h' not in text:
+    path.write_text(header + text)
+print("已插入符号前缀 include：", path)
+PY
+	done
+
+	# 静态化：SHARED → STATIC；去掉 Darwin 的 -Wl,-exported_symbols_list
+	# （那是给 dylib 用的，静态归档用不到，且会带上一个不存在的 .def 依赖）。
+	python3 - "$src_dir/src/citra_libretro/CMakeLists.txt" <<'PY' >> "$configure_log" 2>&1
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+
+shared = 'add_library(citra_libretro SHARED'
+static = 'add_library(citra_libretro STATIC  # Gameshell 补丁：静态链接进主二进制'
+assert shared in text, "找不到 add_library(citra_libretro SHARED)"
+text = text.replace(shared, static, 1)
+
+exported = '''if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR
+    CMAKE_SYSTEM_NAME STREQUAL "iOS" OR
+    CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+  target_link_libraries(citra_libretro PRIVATE "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/libretro.osx.def")
+else()
+  target_link_libraries(citra_libretro PRIVATE "-Wl,-Bsymbolic")
+endif()'''
+assert exported in text, "找不到 Darwin 的 exported_symbols_list 段"
+text = text.replace(
+    exported,
+    '# Gameshell 补丁：静态归档不链接，去掉 -Wl,-exported_symbols_list / -Bsymbolic 等纯链接期开关',
+    1,
+)
+
+path.write_text(text)
+print("已把 citra_libretro 静态化：", path)
+PY
+
+	log "配置 Azahar（交叉编译到 iOS arm64，日志：${configure_log}）"
+	cmake -S "$src_dir" -B "$build_dir" \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT=iphoneos \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+		-DCMAKE_C_COMPILER="$CC" \
+		-DCMAKE_CXX_COMPILER="$CXX" \
+		-DCMAKE_OBJC_COMPILER="$CC" \
+		-DCMAKE_OBJCXX_COMPILER="$CXX" \
+		-DCMAKE_ASM_COMPILER="$CC" \
+		-DCMAKE_C_COMPILER_WORKS=1 \
+		-DCMAKE_CXX_COMPILER_WORKS=1 \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DENABLE_LIBRETRO=ON \
+		-DENABLE_TESTS=OFF \
+		-DENABLE_LTO=OFF \
+		-DHAVE_SYSLOG_R=0 \
+		-DHAVE_EXPLICIT_BZERO=0 \
+		-DCITRA_WARNINGS_AS_ERRORS=OFF \
+		>> "$configure_log" 2>&1
+	if [ $? -ne 0 ]; then
+		log "Azahar 的 cmake 配置失败，详情见 ${configure_log}"
+		return 1
+	fi
+
+	log "开始编译 Azahar libretro 核心（日志：${build_log}，这一步最重，会很久）"
+	cmake --build "$build_dir" --target citra_libretro --parallel 4 >> "$build_log" 2>&1
+	if [ $? -ne 0 ]; then
+		log "Azahar 编译失败，详情见 ${build_log}"
+		return 1
+	fi
+
+	# 合并所有静态库：citra_libretro.a 只含自身目标文件，依赖的 20 多个 .a 不会自动并进去。
+	local -a libs
+	libs=()
+	while IFS= read -r line; do
+		libs+=("$line")
+	done < <(find "$build_dir" -name '*.a' -type f)
+	if [ "${#libs[@]}" -eq 0 ]; then
+		log "编译成功但没找到任何 .a，详情见 ${build_log}"
+		return 1
+	fi
+
+	local libtool
+	libtool="$(xcrun --find libtool 2>/dev/null || command -v libtool || true)"
+	if [ -z "$libtool" ]; then
+		log "找不到 libtool，无法合并 Azahar 静态库"
+		return 1
+	fi
+
+	log "合并 ${#libs[@]} 个静态库为 libazahar.a（日志：${configure_log}）"
+	rm -f "$OUT_DIR/libazahar.a"
+	if ! "$libtool" -static -o "$OUT_DIR/libazahar.a" "${libs[@]}" >> "$configure_log" 2>&1; then
+		log "libtool 合并失败，详情见 ${configure_log}"
+		return 1
+	fi
+	if [ ! -s "$OUT_DIR/libazahar.a" ]; then
+		log "libtool 没有产出 libazahar.a，详情见 ${configure_log}"
+		return 1
+	fi
+
+	log "完成：${OUT_DIR}/libazahar.a（$(du -h "$OUT_DIR/libazahar.a" | cut -f1)）"
+
+	# 合并完成、产物已留下，就把克隆下来的源码树与中间产物删掉：
+	# Azahar 递归子模块体量很大，不删会给后续的 Xcode 构建留下磁盘压力。
+	# 日志在 $OUT_DIR 下的 azahar-*.log，不在这里面，删掉不影响排查。
+	rm -rf "$src_dir" "$build_dir"
 	return 0
 }
 
@@ -374,12 +581,26 @@ else
 	log "找不到 ${MELONDS_DIR}/Makefile，跳过 melonDS"
 fi
 
+# ---------------------------------------------------------------- Azahar（Nintendo 3DS）
+# 上游 Azahar（Citra 后继，GPL-2.0），按给 RetroArch 用的 src/citra_libretro/ 前端形态编，
+# 宿主侧走 libretro 接口（见 Sources/Core/GSAzaharCore.mm）。
+#   · 与其它核心不同：源码不在 Vendor/，由本脚本 git clone --recurse-submodules 现取现编
+#     （它递归子模块近 20 个，全量入库太重），构建完即删。因此这一步需要网络。
+#   · 渲染走软件渲染（软件光栅器 + CPU 帧缓冲），与宿主「只要一帧 RGBA8888」的架构匹配。
+#   · iOS 上核心把 use_cpu_jit 硬写成 false 走解释器，所以 3DS 不需要 JIT（宿主 requiresJIT=NO）。
+#   · 默认布局（上屏叠下屏）合成后 400x480，宿主缓冲上限 1024x512 足够。
+#   · 细节与已验参数全部写在 build_azahar_core() 的注释里（与探路工作流一致）。
+if build_azahar_core; then
+	have_azahar=1
+fi
+
 # ---------------------------------------------------------------- 汇总
 built=""
 [ "$have_mgba" -eq 1 ] && built="${built}mGBA（GBA/GB/GBC）、"
 [ "$have_nestopia" -eq 1 ] && built="${built}Nestopia（NES）、"
 [ "$have_mesens" -eq 1 ] && built="${built}Mesen-S（SNES）、"
 [ "$have_melonds" -eq 1 ] && built="${built}melonDS（NDS/DSi）、"
+[ "$have_azahar" -eq 1 ] && built="${built}Azahar（3DS）、"
 if [ -z "$built" ]; then
 	summary="本次没有核心编译成功（见各 *-configure.log / *-build.log）"
 else

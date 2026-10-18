@@ -39,6 +39,11 @@ extern id<GSEmulatorCore> GSSnesCoreCreate(void);
 extern id<GSEmulatorCore> GSMelonDSCoreCreate(void);
 #endif
 
+#if GS_HAVE_AZAHAR
+/// 实现在 GSAzaharCore.mm（ObjC++：Azahar 是 C++ 库，走 libretro 接口，软件渲染）
+extern id<GSEmulatorCore> GSAzaharCoreCreate(void);
+#endif
+
 NSString *const GSEmulatorErrorDomain = @"GSEmulatorErrorDomain";
 
 typedef NS_ENUM(NSInteger, GSEmulatorErrorCode) {
@@ -377,6 +382,11 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         return GSMelonDSCoreCreate();
     }
 #endif
+#if GS_HAVE_AZAHAR
+    if (system == GSSystem3DS) {
+        return GSAzaharCoreCreate();
+    }
+#endif
     return nil;
 }
 
@@ -399,6 +409,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 #endif
 #if GS_HAVE_MELONDS
         dict[@(GSSystemNDS)] = @"melonDS";
+#endif
+#if GS_HAVE_AZAHAR
+        dict[@(GSSystem3DS)] = @"Azahar";
 #endif
         names = [dict copy];
     });

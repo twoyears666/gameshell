@@ -34,4 +34,8 @@
 #define GS_HAVE_MELONDS 0
 #endif
 
+#ifndef GS_HAVE_AZAHAR
+#define GS_HAVE_AZAHAR 0
+#endif
+
 #endif /* GS_BUILT_CORES_COMPAT_H */

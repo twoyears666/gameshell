@@ -118,7 +118,7 @@
                   fileExtensions: @[@"3ds", @"cia", @"cci", @"cxi", @"app"]
                   plannedCoreName: @"Azahar（Citra 后继）"
                plannedCoreLicense: @"GPL-2.0"
-                      requiresJIT: YES],
+                      requiresJIT: NO],
 
             [self infoWithSystem: GSSystemWii
                       identifier: @"wii"
