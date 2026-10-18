@@ -71,7 +71,11 @@ jobs:
           #   CMAKE_SYSTEM_NAME=iOS + OSX_SYSROOT/ARCHITECTURES/DEPLOYMENT_TARGET
           #   各语言编译器显式指到 SDK 里的 clang（Azahar 会 enable_language(OBJC OBJCXX)，
           #     所以 OBJC/OBJCXX 也要指，否则 cmake 挑宿主编译器、产物是 macOS 架构）
-          #   CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY —— 只编译不链接地试探编译器
+          #   CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY —— 只编译不链接地试探编译器；
+          #     副作用：libressl 的 check_function_exists(syslog_r) 在 iOS 上会「假阳性」，
+          #     于是它不启用自带的 compat 垫片（crypto/compat/syslog_r.c + include/compat/syslog.h），
+          #     cryptlib.c 就去调 iOS 根本没有的 vsyslog_r / SYSLOG_DATA_INIT。
+          #     下面 -DHAVE_SYSLOG_R=0 把该变量先钉住，让检测被整段跳过、compat 垫片生效。
           #   ENABLE_LIBRETRO=ON —— 会自动强制关掉 SDL2/Qt/WebService/Scripting/GDBStub/
           #     OpenAL/Cubeb/libusb/FFmpeg（见根 CMakeLists 的 libretro 冲突处理）
           #   ENABLE_LTO=OFF —— 探路阶段关掉，快且少踩 LTO 的坑
@@ -96,11 +100,15 @@ jobs:
             -DENABLE_LIBRETRO=ON \
             -DENABLE_TESTS=OFF \
             -DENABLE_LTO=OFF \
+            -DHAVE_SYSLOG_R=0 \
             -DCITRA_WARNINGS_AS_ERRORS=OFF \
             2>&1 | tee probe-configure.log
           echo "---- 配置结果里的关键 STATUS 行 ----"
           grep -E 'MoltenVK|Vulkan|OpenGL|LibRetro|libretro|Configuring done|Generating done' \
             probe-configure.log | tail -40 || true
+          echo "---- syslog_r 检测是否已被跳过（期望：有 HAVE_SYSLOG_R=…0，且无 Looking for syslog_r）----"
+          grep -nE 'HAVE_SYSLOG_R' build/CMakeCache.txt 2>/dev/null || echo "(CMakeCache 里没有 HAVE_SYSLOG_R)"
+          grep -n 'Looking for syslog_r' probe-configure.log || echo "(没有 syslog_r 检测行 —— 检测被整段跳过，符合预期)"
 
       - name: 列出 Azahar 的 libretro 构建目标
         run: |
@@ -120,6 +128,8 @@ jobs:
           [ -n "$TARGET" ] || TARGET=citra_libretro
           echo "实际编译目标：$TARGET"
           cmake --build build --target "$TARGET" --parallel 4 2>&1 | tee probe-build.log
+          echo "---- 是否编入了 libressl 的 compat 垫片 syslog_r.c（期望：有）----"
+          grep -n 'compat/syslog_r.c' probe-build.log | head -3 || echo "(没看到 compat/syslog_r.c —— 垫片未生效，需警惕)"
           echo "---- 编译日志尾部 ----"
           tail -n 80 probe-build.log || true
 
