@@ -32,9 +32,24 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # devkitpro 的镜像未必自带 make / git，缺谁补谁，避免第一步就卡住
-      - name: 补齐编译工具（make / git）
+      # devkitpro 镜像只在登录 shell 的 profile 里挂上工具链路径，而 Actions 用的是 sh -e，
+      # 于是 arm-none-eabi-gcc 找不到。这里手动把工具链目录写进 GITHUB_PATH 兜住；
+      # 同时显式导出 DEVKITPRO / DEVKITARM —— 示例的 Makefile 靠 DEVKITPRO 去找 3ds_rules。
+      - name: 准备 devkitARM 环境与编译工具
         run: |
+          echo "---- /opt/devkitpro 目录 ----"
+          ls -la /opt/devkitpro || true
+          echo "---- devkitARM/bin ----"
+          ls /opt/devkitpro/devkitARM/bin 2>/dev/null | head -20 || true
+
+          for d in /opt/devkitpro/devkitARM/bin /opt/devkitpro/tools/bin; do
+            [ -d "$d" ] && echo "$d" >> "$GITHUB_PATH"
+          done
+          echo "DEVKITPRO=/opt/devkitpro" >> "$GITHUB_ENV"
+          echo "DEVKITARM=/opt/devkitpro/devkitARM" >> "$GITHUB_ENV"
+
+          # 3ds_rules / libctru / citro3d 由 3ds-dev 提供，缺了就补
+          [ -f /opt/devkitpro/3ds_rules ] || pacman -Sy --noconfirm 3ds-dev || echo "3ds-dev 安装失败（后面 make 会报出来）"
           command -v make >/dev/null || pacman -Sy --noconfirm make
           command -v git  >/dev/null || pacman -Sy --noconfirm git
 
