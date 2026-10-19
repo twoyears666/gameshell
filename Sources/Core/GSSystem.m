@@ -115,7 +115,7 @@
                       identifier: @"3ds"
                      displayName: @"Nintendo 3DS"
                        shortName: @"3DS"
-                  fileExtensions: @[@"3ds", @"cia", @"cci", @"cxi", @"app"]
+                  fileExtensions: @[@"3ds", @"3dsx", @"cia", @"cci", @"cxi", @"app"]
                   plannedCoreName: @"Azahar（Citra 后继）"
                plannedCoreLicense: @"GPL-2.0"
                       requiresJIT: NO],
