@@ -57,6 +57,8 @@ jobs:
           if ! find /opt/devkitpro -maxdepth 2 -name '3ds_rules' | grep -q . ; then
             pacman -Sy --noconfirm 3ds-dev || echo "3ds-dev 安装失败（后面 make 会报出来）"
           fi
+          # bitmap/24bit-color 示例在构建时要用 ImageMagick 把 PNG 转成位图数据
+          command -v convert >/dev/null || pacman -Sy --noconfirm imagemagick || echo "imagemagick 安装失败（24bit-color 会编不出）"
 
       - name: 检出 3ds-examples 官方示例源码
         run: |
@@ -93,17 +95,6 @@ jobs:
           set -x
           cd examples/graphics/gpu/simple_tri
           make -j"$(nproc)" || echo "simple_tri 编译失败（记下，最后统一汇总）"
-
-      # 示例仓库没有图标 / 横幅资产，CIA 目标多半会失败，失败即忽略（.3dsx 已够用）
-      - name: 尝试打出 .cia 安装包
-        run: |
-          for d in examples/graphics/printing/hello-world \
-                   examples/graphics/bitmap/24bit-color \
-                   examples/graphics/gpu/textured_cube \
-                   examples/graphics/gpu/simple_tri; do
-            echo "==== $d ===="
-            ( cd "$d" && make cia -j"$(nproc)" ) || echo "该示例没有可用的 CIA 目标（忽略）"
-          done
 
       - name: 汇总编译产物
         run: |
