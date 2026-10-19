@@ -1,9 +1,10 @@
 name: Build 3DS Homebrew Test ROM
 
 # 产出小体积的 3DS homebrew 测试程序，用来给 Azahar（3DS）核心做冒烟验证：
-#   · printing.3dsx —— 官方示例的彩色文本控制台，最快能看出「有没有画面」
-#   · bitmap.3dsx   —— 位图绘制示例，用来核对颜色是否偏移（红蓝对调这类问题一眼可见）
-#   · gpu.3dsx      —— citro3d 画的旋转立方体，验证 GL / MoltenVK 呈现通路
+#   · hello-world.3dsx   —— 文本控制台（printing/hello-world），最快看出「有没有画面」
+#   · 24bit-color.3dsx   —— 24 位色彩图（bitmap/24bit-color），核对颜色是否偏移
+#   · textured_cube.3dsx —— citro3d 贴图立方体（gpu/textured_cube），验证 GL / MoltenVK 通路
+#   · simple_tri.3dsx    —— 最简三角形（gpu/simple_tri），GL 通路的兜底
 #
 # 这些示例来自 devkitPro 官方仓库 3ds-examples（源码公开、产出即合法可用的自制程序），
 # 不需要任何商业 ROM，也不含任何加密内容。
@@ -34,13 +35,15 @@ jobs:
     steps:
       # devkitpro 镜像只在登录 shell 的 profile 里挂上工具链路径，而 Actions 用的是 sh -e，
       # 于是 arm-none-eabi-gcc 找不到。这里手动把工具链目录写进 GITHUB_PATH 兜住；
-      # 同时显式导出 DEVKITPRO / DEVKITARM —— 示例的 Makefile 靠 DEVKITPRO 去找 3ds_rules。
+      # 同时显式导出 DEVKITPRO / DEVKITARM —— 示例的 Makefile 靠它们去找 3ds_rules。
       - name: 准备 devkitARM 环境与编译工具
         run: |
           echo "---- /opt/devkitpro 目录 ----"
           ls -la /opt/devkitpro || true
           echo "---- devkitARM/bin ----"
           ls /opt/devkitpro/devkitARM/bin 2>/dev/null | head -20 || true
+          echo "---- 3ds_rules 在哪 ----"
+          find /opt/devkitpro -maxdepth 2 -name '3ds_rules' 2>/dev/null || true
 
           for d in /opt/devkitpro/devkitARM/bin /opt/devkitpro/tools/bin; do
             [ -d "$d" ] && echo "$d" >> "$GITHUB_PATH"
@@ -49,9 +52,11 @@ jobs:
           echo "DEVKITARM=/opt/devkitpro/devkitARM" >> "$GITHUB_ENV"
 
           # 3ds_rules / libctru / citro3d 由 3ds-dev 提供，缺了就补
-          [ -f /opt/devkitpro/3ds_rules ] || pacman -Sy --noconfirm 3ds-dev || echo "3ds-dev 安装失败（后面 make 会报出来）"
           command -v make >/dev/null || pacman -Sy --noconfirm make
           command -v git  >/dev/null || pacman -Sy --noconfirm git
+          if ! find /opt/devkitpro -maxdepth 2 -name '3ds_rules' | grep -q . ; then
+            pacman -Sy --noconfirm 3ds-dev || echo "3ds-dev 安装失败（后面 make 会报出来）"
+          fi
 
       - name: 检出 3ds-examples 官方示例源码
         run: |
@@ -63,30 +68,39 @@ jobs:
           make --version
 
       - name: 列出可编译的示例目录
-        run: find examples -maxdepth 3 -name Makefile | sort
+        run: find examples -maxdepth 4 -name Makefile | sort
 
-      - name: 编译 printing 示例（彩色文本控制台）
+      - name: 编译 hello-world 示例（文本控制台）
         run: |
           set -x
-          cd examples/graphics/printing
-          make -j"$(nproc)" || echo "printing 编译失败（记下，最后统一汇总）"
+          cd examples/graphics/printing/hello-world
+          make -j"$(nproc)" || echo "hello-world 编译失败（记下，最后统一汇总）"
 
-      - name: 编译 bitmap 示例（核对颜色是否偏移）
+      - name: 编译 24bit-color 示例（核对颜色是否偏移）
         run: |
           set -x
-          cd examples/graphics/bitmap
-          make -j"$(nproc)" || echo "bitmap 编译失败（记下，最后统一汇总）"
+          cd examples/graphics/bitmap/24bit-color
+          make -j"$(nproc)" || echo "24bit-color 编译失败（记下，最后统一汇总）"
 
-      - name: 编译 gpu 示例（citro3d 旋转立方体）
+      - name: 编译 textured_cube 示例（citro3d 贴图立方体）
         run: |
           set -x
-          cd examples/graphics/gpu
-          make -j"$(nproc)" || echo "gpu 编译失败（记下，最后统一汇总）"
+          cd examples/graphics/gpu/textured_cube
+          make -j"$(nproc)" || echo "textured_cube 编译失败（记下，最后统一汇总）"
+
+      - name: 编译 simple_tri 示例（最简三角形）
+        run: |
+          set -x
+          cd examples/graphics/gpu/simple_tri
+          make -j"$(nproc)" || echo "simple_tri 编译失败（记下，最后统一汇总）"
 
       # 示例仓库没有图标 / 横幅资产，CIA 目标多半会失败，失败即忽略（.3dsx 已够用）
       - name: 尝试打出 .cia 安装包
         run: |
-          for d in examples/graphics/printing examples/graphics/bitmap examples/graphics/gpu; do
+          for d in examples/graphics/printing/hello-world \
+                   examples/graphics/bitmap/24bit-color \
+                   examples/graphics/gpu/textured_cube \
+                   examples/graphics/gpu/simple_tri; do
             echo "==== $d ===="
             ( cd "$d" && make cia -j"$(nproc)" ) || echo "该示例没有可用的 CIA 目标（忽略）"
           done
@@ -95,7 +109,7 @@ jobs:
         run: |
           set -u
           mkdir -p out
-          find examples -maxdepth 4 \( -name '*.3dsx' -o -name '*.cia' \) -exec cp -v {} out/ \;
+          find examples -maxdepth 5 \( -name '*.3dsx' -o -name '*.cia' \) -exec cp -v {} out/ \;
           echo "---- 最终产物 ----"
           ls -lh out
 
@@ -104,7 +118,8 @@ jobs:
         run: |
           echo "构建失败：打印容器环境与示例目录，便于定位"
           id
-          find examples -maxdepth 3 -name Makefile | sort || true
+          find /opt/devkitpro -maxdepth 2 -name '3ds_rules' 2>/dev/null || true
+          find examples -maxdepth 4 -name Makefile | sort || true
           ls -la out 2>/dev/null || echo "(没有 out 目录)"
 
       # 用 always()：就算某个示例编失败，其它成功的产物也要传上来
