@@ -139,7 +139,7 @@ struct TouchLayoutEditor: View {
         switch element {
         case .dPad:
             DPadControl(size: metrics.dpadSize * elementLayout.scale, interactive: false) { _ in }
-        case .A, .B, .X, .Y, .L, .R, .start, .select, .menu:
+        case .A, .B, .X, .Y, .L, .R, .ZL, .ZR, .start, .select, .menu, .home:
             keyView(element, metrics: metrics, elementLayout: elementLayout)
         default:
             EmptyView()
@@ -330,6 +330,9 @@ struct TouchLayoutEditor: View {
         case .Y:      return "Y"
         case .L:      return "L"
         case .R:      return "R"
+        case .ZL:     return "ZL"
+        case .ZR:     return "ZR"
+        case .home:   return "HOME"
         case .start:  return "START"
         case .select: return "SELECT"
         case .menu:   return "MENU"
@@ -340,8 +343,9 @@ struct TouchLayoutEditor: View {
     private static func fontSize(for element: GSTouchElement, metrics: GamepadMetrics, scale: CGFloat) -> CGFloat {
         switch element {
         case .A, .B, .X, .Y:         return metrics.faceDiameter * scale * 0.36
-        case .L, .R:                 return 14 * scale
+        case .L, .R, .ZL, .ZR:       return 14 * scale
         case .start, .select, .menu: return 11 * scale
+        case .home:                  return 11 * scale
         default:                     return 12 * scale
         }
     }

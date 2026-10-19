@@ -44,6 +44,8 @@ struct GamepadMetrics {
     /// Menu 是单个胶囊按键
     var menuWidth: CGFloat { pillWidth }
     var menuHeight: CGFloat { pillHeight }
+    /// HOME 是 3DS 上的小圆键
+    var homeDiameter: CGFloat { faceDiameter * 0.82 }
 
     /// 某元素在给定布局下的尺寸 —— **每个按键各自一套**，播放器与编辑器共用（编辑器用它决定拖拽热区）
     func box(for element: GSTouchElement, layout: GSTouchElementLayout) -> CGSize {
@@ -53,12 +55,14 @@ struct GamepadMetrics {
             return CGSize(width: dpadSize * scale, height: dpadSize * scale)
         case .A, .B, .X, .Y:
             return CGSize(width: faceDiameter * scale, height: faceDiameter * scale)
-        case .L, .R:
+        case .L, .R, .ZL, .ZR:
             return CGSize(width: shoulderWidth * scale, height: shoulderHeight * scale)
         case .start, .select:
             return CGSize(width: pillWidth * scale, height: pillHeight * scale)
         case .menu:
             return CGSize(width: menuWidth * scale, height: menuHeight * scale)
+        case .home:
+            return CGSize(width: homeDiameter * scale, height: homeDiameter * scale)
         default:
             return CGSize(width: faceDiameter * scale, height: faceDiameter * scale)
         }
@@ -130,8 +134,11 @@ struct VirtualGamepad: View {
             if shows(.Y) { keyNode(.Y) }
             if shows(.L) { keyNode(.L) }
             if shows(.R) { keyNode(.R) }
+            if shows(.ZL) { keyNode(.ZL) }
+            if shows(.ZR) { keyNode(.ZR) }
             if shows(.select) { keyNode(.select) }
             if shows(.start) { keyNode(.start) }
+            if shows(.home) { keyNode(.home) }
             if shows(.menu) { menuNode }
         }
         .frame(width: size.width, height: size.height)
@@ -194,6 +201,9 @@ struct VirtualGamepad: View {
         case .Y:      return .Y
         case .L:      return .L
         case .R:      return .R
+        case .ZL:     return .ZL
+        case .ZR:     return .ZR
+        case .home:   return .home
         case .start:  return .start
         case .select: return .select
         default:      return []
@@ -209,6 +219,9 @@ struct VirtualGamepad: View {
         case .Y:      return "Y"
         case .L:      return "L"
         case .R:      return "R"
+        case .ZL:     return "ZL"
+        case .ZR:     return "ZR"
+        case .home:   return "HOME"
         case .start:  return "START"
         case .select: return "SELECT"
         default:      return ""
@@ -219,8 +232,9 @@ struct VirtualGamepad: View {
     private static func fontSize(for element: GSTouchElement, metrics: GamepadMetrics, scale: CGFloat) -> CGFloat {
         switch element {
         case .A, .B, .X, .Y:         return metrics.faceDiameter * scale * 0.36
-        case .L, .R:                 return 14 * scale
+        case .L, .R, .ZL, .ZR:       return 14 * scale
         case .start, .select, .menu: return 11 * scale
+        case .home:                  return 11 * scale
         default:                     return 12 * scale
         }
     }

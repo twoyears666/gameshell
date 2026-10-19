@@ -48,8 +48,13 @@ final class AppState: ObservableObject {
     /// 外设状态摘要（手柄 / 键鼠）
     @Published private(set) var inputSummary: String = "未检测到外设"
 
+    /// 被「收藏置顶」的条目 id（game:/rom: 前缀 + identifier），持久化在 UserDefaults
+    @Published private(set) var pinnedIdentifiers: Set<String> = []
+
     /// 三端键位配置（触屏 / 键盘 / 手柄）：设置页改的就是这一份，模拟器读的也是它
     let keyMapping = GSKeyMapping.shared()
+
+    private let pinnedStoreKey = "GS.pinnedIdentifiers"
 
     private var inputObserver: NSObjectProtocol?
 
@@ -64,18 +69,29 @@ final class AppState: ObservableObject {
     #endif
 
     init() {
+        loadPinned()
         loadManifest()
         refreshROMs()
         refreshRecent()
         observeInput()
     }
 
+    /// 读取「收藏置顶」记录
+    private func loadPinned() {
+        if let saved = UserDefaults.standard.array(forKey: pinnedStoreKey) as? [String] {
+            pinnedIdentifiers = Set(saved)
+        }
+    }
+
     var title: String { manifest?.title ?? "Gameshell" }
     var subtitle: String { manifest?.subtitle ?? "" }
 
-    /// 游戏库内容：用户添加的 URL 条目 + 导入的 ROM，混排在一起
+    /// 游戏库内容：用户添加的 URL 条目 + 导入的 ROM，混排在一起；被置顶的排在前面
     var libraryItems: [LibraryItem] {
-        games.map { .game($0) } + roms.map { .rom($0) }
+        let all = games.map { .game($0) } + roms.map { .rom($0) }
+        let pinned = all.filter { pinnedIdentifiers.contains($0.id) }
+        let rest = all.filter { !pinnedIdentifiers.contains($0.id) }
+        return pinned + rest
     }
 
     /// 重新扫 ROM 库 + 刷新最近游玩（进主界面时调一次）
@@ -397,6 +413,252 @@ final class AppState: ObservableObject {
         emulatorSession = nil
         playingROM = nil
         emulatorStartFailure = nil
+    }
+
+    // MARK: - 长按菜单（分组与条目参考 Manic Emu 的 Game Option）
+
+    /// 长按方块卡呼出的分组菜单：A 条目管理 / B 存档 / C 按键外设 / E 3DS 专属 / F 速度 / G 信息
+    func showGameMenu(for item: LibraryItem) {
+        presentOverlay(OverlayRequest(kind: .menu,
+                                      title: item.title,
+                                      detail: item.subtitle,
+                                      sections: menuSections(for: item)))
+    }
+
+    /// 目前没有任何浮层时也允许直接弹出（供菜单内部用）
+    private func presentOverlay(_ request: OverlayRequest) {
+        withAnimation(Theme.Motion.spring) { overlay = request }
+    }
+
+    private func menuSections(for item: LibraryItem) -> [OverlayMenuSection] {
+        var sections: [OverlayMenuSection] = []
+
+        // A 条目管理
+        sections.append(OverlayMenuSection(title: "条目管理", items: [
+            OverlayMenuItem(title: "重命名", systemImage: "pencil") { [weak self] in
+                self?.promptRename(item)
+            },
+            OverlayMenuItem(title: "修改封面", systemImage: "photo") { [weak self] in
+                self?.showToast("修改封面需要相册选图，暂未接入")
+            },
+            OverlayMenuItem(title: "抓取封面", systemImage: "arrow.down.circle") { [weak self] in
+                self?.refetchCover(for: item)
+            },
+            OverlayMenuItem(title: "分享 / 复制启动链接", systemImage: "square.and.arrow.up") { [weak self] in
+                self?.copyLaunchLink(for: item)
+            },
+            OverlayMenuItem(title: isPinned(item) ? "取消置顶" : "收藏置顶", systemImage: "pin") { [weak self] in
+                self?.togglePin(item)
+            },
+            OverlayMenuItem(title: "移除游戏", systemImage: "trash", isDestructive: true) { [weak self] in
+                self?.confirmRemoval(of: item)
+            },
+        ]))
+
+        // B 存档
+        sections.append(OverlayMenuSection(title: "存档", items: [
+            OverlayMenuItem(title: "查看即时存档", systemImage: "clock.arrow.circlepath") { [weak self] in
+                self?.showToast("即时存档要在游戏内查看（播放器顶栏）")
+            },
+            OverlayMenuItem(title: "导入存档", systemImage: "square.and.arrow.down") { [weak self] in
+                self?.showToast("导入存档暂未接入")
+            },
+            OverlayMenuItem(title: "导出存档", systemImage: "square.and.arrow.up") { [weak self] in
+                self?.showToast("导出存档暂未接入")
+            },
+        ]))
+
+        // C 按键外设
+        sections.append(OverlayMenuSection(title: "按键外设", items: [
+            OverlayMenuItem(title: "控制器映射", systemImage: "gamecontroller") { [weak self] in
+                self?.openSettings()
+            },
+            OverlayMenuItem(title: "死区设置", systemImage: "circle.dashed") { [weak self] in
+                self?.openSettings()
+                self?.showToast("死区在「手柄」设置里调整")
+            },
+            OverlayMenuItem(title: "震感", systemImage: "waveform") { [weak self] in
+                self?.showToast("震感设置暂未接入")
+            },
+            OverlayMenuItem(title: "触屏手柄布局", systemImage: "rectangle.on.rectangle") { [weak self] in
+                self?.openSettings()
+                self?.showToast("触屏布局在「触屏手柄」设置里调整")
+            },
+        ]))
+
+        // E 3DS 专属：只读展示 JIT 档位（其余条目需要核心配合，本轮不做）
+        if is3DS(item) {
+            let enabled = GSJIT.probeStatus() == .enabled
+            sections.append(OverlayMenuSection(title: "3DS 专属", items: [
+                OverlayMenuItem(title: "JIT 档位", systemImage: "cpu",
+                                detail: enabled ? "已启用" : "解释器") { [weak self] in
+                    self?.showInfo(title: "3DS 运行档位",
+                                   message: enabled
+                                   ? "当前进程可用 JIT：3DS 以 dynarmic 高速档运行。"
+                                   : "当前进程拿不到可执行内存：3DS 自动回落到 FastInterp 解释器，仍可正常游玩。")
+                },
+            ]))
+        }
+
+        // F 速度
+        sections.append(OverlayMenuSection(title: "速度", items: [
+            OverlayMenuItem(title: "加速", systemImage: "forward") { [weak self] in
+                self?.showToast("速度档位在游戏内顶栏切换")
+            },
+            OverlayMenuItem(title: "慢放", systemImage: "backward") { [weak self] in
+                self?.showToast("速度档位在游戏内顶栏切换")
+            },
+        ]))
+
+        // G 信息
+        sections.append(OverlayMenuSection(title: "信息", items: [
+            OverlayMenuItem(title: "游戏信息", systemImage: "info.circle", detail: infoDetail(item)) { [weak self] in
+                self?.showGameInfo(item)
+            },
+        ]))
+
+        return sections
+    }
+
+    // MARK: - 菜单里的动作
+
+    func isPinned(_ item: LibraryItem) -> Bool {
+        pinnedIdentifiers.contains(item.id)
+    }
+
+    func togglePin(_ item: LibraryItem) {
+        if pinnedIdentifiers.contains(item.id) {
+            pinnedIdentifiers.remove(item.id)
+        } else {
+            pinnedIdentifiers.insert(item.id)
+        }
+        UserDefaults.standard.set(Array(pinnedIdentifiers), forKey: pinnedStoreKey)
+        showToast(isPinned(item) ? "已置顶「\(item.title)」" : "已取消置顶「\(item.title)」")
+    }
+
+    private func promptRename(_ item: LibraryItem) {
+        presentOverlay(OverlayRequest(kind: .prompt,
+                                      title: "重命名",
+                                      confirmTitle: "保存",
+                                      cancelTitle: "取消",
+                                      placeholder: "新名称",
+                                      initialText: item.title,
+                                      onSubmit: { [weak self] newName in
+            self?.rename(item, to: newName)
+        }))
+    }
+
+    private func rename(_ item: LibraryItem, to newName: String) {
+        switch item {
+        case .game(let game):
+            game.name = newName
+            guard let manifest else {
+                showToast("清单不可用，改名没保存")
+                return
+            }
+            games = manifest.games
+            if !manifest.persistToUserStore() {
+                showToast("改名已生效，但写入沙盒失败")
+                return
+            }
+            showToast("已重命名为「\(newName)」")
+        case .rom:
+            showToast("ROM 名称取自文件名，请在「文件」里重命名后重新扫描")
+        }
+    }
+
+    private func refetchCover(for item: LibraryItem) {
+        switch item {
+        case .game:
+            showToast("URL 条目的封面来自清单里的 icon，暂不支持远程抓取")
+        case .rom(let rom):
+            if let cached = GSCoverFetcher.cachedCoverRelativePath(for: rom) {
+                romCovers[rom.identifier] = cached
+                showToast("已有缓存封面")
+                return
+            }
+            showToast("正在抓取「\(rom.name)」的封面…")
+            GSCoverFetcher.shared().fetchCovers(roms: [rom], limit: 1, progress: { [weak self] identifier, path in
+                DispatchQueue.main.async {
+                    self?.romCovers[identifier] = path
+                    self?.showToast("封面抓取完成")
+                }
+            }, completion: nil)
+        }
+    }
+
+    private func copyLaunchLink(for item: LibraryItem) {
+        switch item {
+        case .game(let game):
+            let link = GSGameLauncher.deepLink(with: .play, parameters: ["id": game.identifier])
+            copyToClipboard(link.absoluteString)
+            showToast("已复制启动链接")
+        case .rom(let rom):
+            copyToClipboard(rom.absolutePath)
+            showToast("ROM 无深链，已复制文件路径")
+        }
+    }
+
+    private func copyToClipboard(_ text: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = text
+        #elseif os(macOS)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        #endif
+    }
+
+    private func is3DS(_ item: LibraryItem) -> Bool {
+        guard case .rom(let rom) = item else { return false }
+        return GSSystemRegistry.info(for: rom.system).identifier == "3ds"
+    }
+
+    private func infoDetail(_ item: LibraryItem) -> String? {
+        switch item {
+        case .game(let game): return game.platform
+        case .rom(let rom):
+            let info = GSSystemRegistry.info(for: rom.system)
+            return "\(info.shortName) · \(fileSizeText(rom.sizeBytes))"
+        }
+    }
+
+    func showGameInfo(_ item: LibraryItem) {
+        let message: String
+        switch item {
+        case .game(let game):
+            message = """
+            类型：URL 条目
+            平台：\(game.platform)
+            入口：\(game.gameURLString)
+            """
+        case .rom(let rom):
+            let info = GSSystemRegistry.info(for: rom.system)
+            let jit = GSJIT.probeStatus() == .enabled ? "已启用" : "不可用（走解释器）"
+            let core = info.plannedCoreName ?? "—"
+            message = """
+            类型：模拟器 ROM
+            系统：\(info.displayName)
+            文件：\(rom.fileName)
+            大小：\(fileSizeText(rom.sizeBytes))
+            核心：\(core)（\(info.coreIntegrated ? "已接入" : "未接入")）
+            JIT：\(jit)
+            路径：\(rom.absolutePath)
+            """
+        }
+        showInfo(title: item.title, message: message)
+    }
+
+    private func fileSizeText(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    /// 只读信息卡
+    private func showInfo(title: String, message: String) {
+        presentOverlay(OverlayRequest(kind: .info,
+                                      title: title,
+                                      message: message,
+                                      confirmTitle: "好"))
     }
 
     // MARK: - 设置页

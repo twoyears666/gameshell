@@ -17,6 +17,9 @@ static NSString *GSButtonKey(GSButton button) {
         case GSButtonR:      return @"R";
         case GSButtonStart:  return @"Start";
         case GSButtonSelect: return @"Select";
+        case GSButtonZL:     return @"ZL";
+        case GSButtonZR:     return @"ZR";
+        case GSButtonHome:   return @"Home";
         default:             return @"";
     }
 }
@@ -105,6 +108,9 @@ static NSString *GSTouchElementKey(GSTouchElement element) {
         case GSTouchElementSelect:      return @"select";
         case GSTouchElementMenu:        return @"menu";
         case GSTouchElementTouchScreen: return @"touchScreen";
+        case GSTouchElementZL:          return @"ZL";
+        case GSTouchElementZR:          return @"ZR";
+        case GSTouchElementHome:        return @"Home";
     }
     return @"";
 }
@@ -114,6 +120,7 @@ static const GSTouchElement GSTouchElementAll[] = {
     GSTouchElementDPad, GSTouchElementA, GSTouchElementB, GSTouchElementX, GSTouchElementY,
     GSTouchElementL, GSTouchElementR, GSTouchElementStart, GSTouchElementSelect,
     GSTouchElementMenu, GSTouchElementTouchScreen,
+    GSTouchElementZL, GSTouchElementZR, GSTouchElementHome,
 };
 
 /// 键名 → 元素；不认识返回 NO（可能是旧「按键簇」的键名，交给迁移路径处理）
@@ -146,7 +153,7 @@ static GSTouchElementLayout *GSTouchElementLayoutFromValues(NSDictionary *values
 
 /// 参与配置的系统的标识全集（迁移旧「全局一套」数据时平摊到这些系统）
 static NSArray<NSString *> *GSAllSystemIdentifiers(void) {
-    return @[@"nes", @"snes", @"gb", @"gbc", @"gba", @"nds"];
+    return @[@"nes", @"snes", @"gb", @"gbc", @"gba", @"nds", @"3ds"];
 }
 
 /// 判断一份键位字典是「按系统分桶」的新格式还是「全局一套」的旧格式。
@@ -200,6 +207,12 @@ static BOOL GSIsEightBitSystem(NSString *systemIdentifier) {
 /// 某系统有哪些触屏元素
 static NSArray<NSNumber *> *GSElementsForSystem(NSString *systemIdentifier) {
     NSString *system = GSSystemKey(systemIdentifier);
+    if ([system isEqualToString: @"3ds"]) {
+        // 3DS：十字键 + A/B/X/Y + L/R + ZL/ZR（New 3DS 后肩键）+ START/SELECT + HOME
+        return @[@(GSTouchElementDPad), @(GSTouchElementA), @(GSTouchElementB), @(GSTouchElementX), @(GSTouchElementY),
+                 @(GSTouchElementL), @(GSTouchElementR), @(GSTouchElementZL), @(GSTouchElementZR),
+                 @(GSTouchElementStart), @(GSTouchElementSelect), @(GSTouchElementHome)];
+    }
     if ([system isEqualToString: @"nds"]) {
         return @[@(GSTouchElementDPad), @(GSTouchElementA), @(GSTouchElementB), @(GSTouchElementX), @(GSTouchElementY),
                  @(GSTouchElementL), @(GSTouchElementR), @(GSTouchElementStart), @(GSTouchElementSelect),
@@ -222,6 +235,26 @@ static NSArray<NSNumber *> *GSElementsForSystem(NSString *systemIdentifier) {
 /// 数值由旧「按键簇」默认（参照 Delta「Standard GBA / Standard DS」皮肤、667×375 画布）
 /// 拆分成单个按键：簇中心 + 单键相对簇中心的偏移（A/B 斜排、A/B/X/Y 菱形、START/SELECT 并排）。
 static GSTouchElementLayout *GSDefaultLayoutForElement(GSTouchElement element, NSString *systemIdentifier) {
+    if ([GSSystemKey(systemIdentifier) isEqualToString: @"3ds"]) {
+        // 3DS（横屏铺满）：面键沿用 GBA 菱形，ZL/ZR 摆在 L/R 正下方，HOME 居中偏下
+        switch (element) {
+            case GSTouchElementDPad:        return [GSTouchElementLayout layoutWithX: 0.143 y: 0.745 scale: 1.0];
+            case GSTouchElementA:           return [GSTouchElementLayout layoutWithX: 0.907 y: 0.736 scale: 1.0];
+            case GSTouchElementB:           return [GSTouchElementLayout layoutWithX: 0.829 y: 0.849 scale: 1.0];
+            case GSTouchElementX:           return [GSTouchElementLayout layoutWithX: 0.865 y: 0.710 scale: 1.0];
+            case GSTouchElementY:           return [GSTouchElementLayout layoutWithX: 0.823 y: 0.784 scale: 1.0];
+            case GSTouchElementL:           return [GSTouchElementLayout layoutWithX: 0.097 y: 0.093 scale: 1.0];
+            case GSTouchElementR:           return [GSTouchElementLayout layoutWithX: 0.903 y: 0.093 scale: 1.0];
+            case GSTouchElementZL:          return [GSTouchElementLayout layoutWithX: 0.078 y: 0.220 scale: 1.0];
+            case GSTouchElementZR:          return [GSTouchElementLayout layoutWithX: 0.922 y: 0.220 scale: 1.0];
+            case GSTouchElementStart:       return [GSTouchElementLayout layoutWithX: 0.640 y: 0.928 scale: 1.0];
+            case GSTouchElementSelect:      return [GSTouchElementLayout layoutWithX: 0.360 y: 0.928 scale: 1.0];
+            case GSTouchElementHome:        return [GSTouchElementLayout layoutWithX: 0.500 y: 0.928 scale: 1.0];
+            case GSTouchElementMenu:        return [GSTouchElementLayout layoutWithX: 0.292 y: 0.768 scale: 1.0];
+            case GSTouchElementTouchScreen: return [GSTouchElementLayout layoutWithX: 0.735 y: 0.323 scale: 1.0];
+        }
+        return [GSTouchElementLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
+    }
     if ([GSSystemKey(systemIdentifier) isEqualToString: @"nds"]) {
         switch (element) {
             case GSTouchElementDPad:        return [GSTouchElementLayout layoutWithX: 0.115 y: 0.791 scale: 1.0];
@@ -235,6 +268,9 @@ static GSTouchElementLayout *GSDefaultLayoutForElement(GSTouchElement element, N
             case GSTouchElementSelect:      return [GSTouchElementLayout layoutWithX: 0.444 y: 0.767 scale: 1.0];
             case GSTouchElementMenu:        return [GSTouchElementLayout layoutWithX: 0.292 y: 0.768 scale: 1.0];
             case GSTouchElementTouchScreen: return [GSTouchElementLayout layoutWithX: 0.735 y: 0.323 scale: 1.0];
+            case GSTouchElementZL:          return [GSTouchElementLayout layoutWithX: 0.078 y: 0.220 scale: 1.0];
+            case GSTouchElementZR:          return [GSTouchElementLayout layoutWithX: 0.922 y: 0.220 scale: 1.0];
+            case GSTouchElementHome:        return [GSTouchElementLayout layoutWithX: 0.500 y: 0.928 scale: 1.0];
         }
         return [GSTouchElementLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
     }
@@ -252,6 +288,9 @@ static GSTouchElementLayout *GSDefaultLayoutForElement(GSTouchElement element, N
         case GSTouchElementSelect:      return [GSTouchElementLayout layoutWithX: 0.410 y: 0.928 scale: 1.0];
         case GSTouchElementMenu:        return [GSTouchElementLayout layoutWithX: 0.292 y: 0.768 scale: 1.0];
         case GSTouchElementTouchScreen: return [GSTouchElementLayout layoutWithX: 0.735 y: 0.323 scale: 1.0];
+        case GSTouchElementZL:          return [GSTouchElementLayout layoutWithX: 0.078 y: 0.220 scale: 1.0];
+        case GSTouchElementZR:          return [GSTouchElementLayout layoutWithX: 0.922 y: 0.220 scale: 1.0];
+        case GSTouchElementHome:        return [GSTouchElementLayout layoutWithX: 0.500 y: 0.928 scale: 1.0];
     }
     return [GSTouchElementLayout layoutWithX: 0.5 y: 0.5 scale: 1.0];
 }
@@ -376,6 +415,8 @@ static NSArray<NSNumber *> *GSElementsForLegacyClusterKey(NSString *clusterKey) 
         @(GSButtonA), @(GSButtonB), @(GSButtonX), @(GSButtonY),
         @(GSButtonUp), @(GSButtonDown), @(GSButtonLeft), @(GSButtonRight),
         @(GSButtonL), @(GSButtonR), @(GSButtonStart), @(GSButtonSelect),
+        // New 3DS 等新增按键（ZL / ZR 后肩键、HOME 系统键）
+        @(GSButtonZL), @(GSButtonZR), @(GSButtonHome),
     ];
 }
 
@@ -393,6 +434,9 @@ static NSArray<NSNumber *> *GSElementsForLegacyClusterKey(NSString *clusterKey) 
         case GSButtonR:      return @"R 肩键";
         case GSButtonStart:  return @"Start";
         case GSButtonSelect: return @"Select";
+        case GSButtonZL:     return @"ZL 肩键";
+        case GSButtonZR:     return @"ZR 肩键";
+        case GSButtonHome:   return @"HOME 键";
         default:             return @"未知按键";
     }
 }
@@ -431,6 +475,9 @@ static NSArray<NSNumber *> *GSElementsForLegacyClusterKey(NSString *clusterKey) 
         case GSTouchElementSelect:      return @"SELECT";
         case GSTouchElementMenu:        return @"Menu";
         case GSTouchElementTouchScreen: return @"触摸屏";
+        case GSTouchElementZL:          return @"ZL 肩键";
+        case GSTouchElementZR:          return @"ZR 肩键";
+        case GSTouchElementHome:        return @"HOME";
     }
     return @"按键";
 }
@@ -597,6 +644,10 @@ static NSArray<NSNumber *> *GSElementsForLegacyClusterKey(NSString *clusterKey) 
         @"Down":   @"Direction Pad Down",
         @"Left":   @"Direction Pad Left",
         @"Right":  @"Direction Pad Right",
+        // New 3DS 等新增按键：ZL/ZR 走手柄扳机，HOME 走手柄 Home 键
+        @"ZL":     @"Left Trigger",
+        @"ZR":     @"Right Trigger",
+        @"Home":   @"Home",
     };
 }
 

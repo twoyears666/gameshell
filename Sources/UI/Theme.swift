@@ -113,6 +113,10 @@ enum Theme {
         static let quick = Animation.easeOut(duration: 0.18)
         static let standard = Animation.easeInOut(duration: 0.26)
         static let spring = Animation.spring(response: 0.35, dampingFraction: 0.82)
+        /// 选中 / 按压的回弹：幅度更大、更「弹」（首页卡片的聚焦切换用这个）
+        static let pop = Animation.spring(response: 0.42, dampingFraction: 0.68)
+        /// 列表 / 网格入场：带一点回弹的错峰动画
+        static let entrance = Animation.spring(response: 0.55, dampingFraction: 0.85)
     }
 
     // MARK: - 布局断点

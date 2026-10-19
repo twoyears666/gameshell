@@ -62,7 +62,8 @@
 //  单例：Azahar 的 libretro 前端里 emu_instance / 各回调都是文件级全局，
 //  所以同一时刻只能有一个会话。GSEmulatorSession 每次新建一个核心实例、用完必须 shutdown。
 //
-//  尚未接入：触摸屏（下屏）与摇杆（Circle Pad）。宿主协议目前只有按键位（GSButton），
+//  已接入：常规按键 + New 3DS 的 ZL / ZR / HOME（翻成 retro 的 L2 / R2 / L3）。
+//  尚未接入：触摸屏（下屏）与摇杆（Circle Pad / C-Stick）。宿主协议目前只有按键位（GSButton），
 //  没有摇杆通道；触摸层在播放器里也是 NDS 专用。这两个能力待宿主协议扩展后再补，
 //  本文件不假装实现。
 //
@@ -658,7 +659,8 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
     // GSButton 与 retro 的 joypad id 位序不是一回事，必须显式翻一遍。
     // （retro: B=0 Y=1 SELECT=2 START=3 UP=4 DOWN=5 LEFT=6 RIGHT=7 A=8 X=9 L=10 R=11
     //   GSButton: A=bit0 B=bit1 SELECT=bit2 START=bit3 RIGHT=bit4 LEFT=bit5
-    //             UP=bit6 DOWN=bit7 R=bit8 L=bit9 X=bit10 Y=bit11）
+    //             UP=bit6 DOWN=bit7 R=bit8 L=bit9 X=bit10 Y=bit11
+    //             ZL=bit12 ZR=bit13 HOME=bit14）
     switch (ident) {
         case RETRO_DEVICE_ID_JOYPAD_A:      return (_buttonMask & GSButtonA) ? 1 : 0;
         case RETRO_DEVICE_ID_JOYPAD_B:      return (_buttonMask & GSButtonB) ? 1 : 0;
@@ -672,6 +674,10 @@ static int16_t gs_retro_input_state(unsigned port, unsigned device, unsigned ind
         case RETRO_DEVICE_ID_JOYPAD_DOWN:   return (_buttonMask & GSButtonDown) ? 1 : 0;
         case RETRO_DEVICE_ID_JOYPAD_LEFT:   return (_buttonMask & GSButtonLeft) ? 1 : 0;
         case RETRO_DEVICE_ID_JOYPAD_RIGHT:  return (_buttonMask & GSButtonRight) ? 1 : 0;
+        // New 3DS 新增按键：ZL→L2、ZR→R2、HOME→L3（retro 标准键位，宿主侧翻一遍即可）
+        case RETRO_DEVICE_ID_JOYPAD_L2:     return (_buttonMask & GSButtonZL) ? 1 : 0;
+        case RETRO_DEVICE_ID_JOYPAD_R2:     return (_buttonMask & GSButtonZR) ? 1 : 0;
+        case RETRO_DEVICE_ID_JOYPAD_L3:     return (_buttonMask & GSButtonHome) ? 1 : 0;
         default:                            return 0;
     }
 }

@@ -41,6 +41,9 @@ typedef NS_ENUM(NSInteger, GSTouchElement) {
     GSTouchElementSelect,       // SELECT
     GSTouchElementMenu,         // Menu（NDS：切换游戏内暂停菜单）
     GSTouchElementTouchScreen,  // 触摸屏（NDS 下屏，整体）
+    GSTouchElementZL,           // ZL（New 3DS 左后肩键）
+    GSTouchElementZR,           // ZR（New 3DS 右后肩键）
+    GSTouchElementHome,         // HOME（3DS 系统键）
 };
 
 /// 单个元素的布局：归一化中心坐标（0–1，相对手柄可用区域）+ 相对默认尺寸的缩放。
@@ -73,7 +76,7 @@ typedef NS_ENUM(NSInteger, GSTouchElement) {
 #pragma mark - 触屏元素（按系统区分）
 
 /// 某系统该有哪些触屏元素（设置页遍历、播放器渲染都用它）。
-/// systemIdentifier 取 GSSystemInfo.identifier（"nes" / "snes" / "gb" / "gbc" / "gba" / "nds"）。
+/// systemIdentifier 取 GSSystemInfo.identifier（"nes" / "snes" / "gb" / "gbc" / "gba" / "nds" / "3ds"）。
 + (NSArray<NSNumber *> *)touchElementsForSystem:(NSString *)systemIdentifier NS_SWIFT_NAME(touchElements(forSystem:));
 /// 触屏元素在某系统里的展示名（"十字键" / "A 键" / "START" / "Menu" / "触摸屏" …）
 + (NSString *)displayNameForElement:(GSTouchElement)element NS_SWIFT_NAME(displayName(forElement:));

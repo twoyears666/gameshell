@@ -39,6 +39,12 @@ typedef NS_OPTIONS(uint32_t, GSButton) {
     /// 8 / 16 位机的常用别名（A/B 与 GBA 一致，R/L 在 NES/SNES 上映射到 X/Y 之外的肩键）
     GSButtonX      = 1u << 10,
     GSButtonY      = 1u << 11,
+
+    /// New 3DS 等新增按键（宿主侧定义；下发时各自翻成 retro 的对应 joypad id）：
+    /// ZL / ZR 是 New 3DS 才有的后肩键，HOME 是 3DS 的系统键。
+    GSButtonZL     = 1u << 12,
+    GSButtonZR     = 1u << 13,
+    GSButtonHome   = 1u << 14,
 };
 
 /// JIT 状态（Wii / 3DS / Wii U 依赖它）

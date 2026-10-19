@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 /// `onHover` 在 iOS 上要 16.4+（只有 iPadOS 接指针时才有意义），低版本直接跳过。
 extension View {
@@ -15,8 +16,8 @@ extension View {
 /// 方块卡片（PS5 风格）：正方形封面 + 底部名称。
 /// 同一张卡同时服务 URL 条目与 ROM：封面来源由 LibraryItem（清单 icon / 远程 URL）
 /// 与 coverRelativePath（已抓到的 ROM 封面）共同决定。
-/// 获得聚焦（指针悬停 / 默认第一项）的卡片放大、高亮描边，其余变暗缩小。
-/// 点按 = 打开；长按 = 自绘确认后删除。
+/// 获得聚焦（手柄 / 键盘移动，或指针悬停）的卡片放大并亮白框，其余变暗缩小、**不描边**。
+/// 点按 = 打开；长按 = 回弹一下再呼出分组菜单。
 struct SquareTileCard: View {
     let item: LibraryItem
     /// ROM 封面的相对路径（由 AppState 在抓取完成后提供；URL 条目不用）
@@ -26,6 +27,9 @@ struct SquareTileCard: View {
     var onHover: (Bool) -> Void
     var onTap: () -> Void
     var onLongPress: () -> Void
+
+    /// 长按命中的瞬时回弹
+    @State private var pulse = false
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -76,20 +80,27 @@ struct SquareTileCard: View {
         }
         .frame(width: side, height: side)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.hero, style: .continuous))
+        // 白框只出现在选中的那一张上，其余卡片一律不描边
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.hero, style: .continuous)
-                .stroke(isFocused ? SwiftUI.Color.white.opacity(0.9) : Theme.Color.border,
-                        lineWidth: isFocused ? 2 : 1)
+                .stroke(SwiftUI.Color.white.opacity(0.92), lineWidth: 2.5)
+                .opacity(isFocused ? 1 : 0)
         )
-        .opacity(item.isPlayable ? (isFocused ? 1 : 0.72) : 0.66)
-        .scaleEffect(isFocused ? 1 : 0.93)
-        .shadow(color: .black.opacity(isFocused ? 0.45 : 0.2),
-                radius: isFocused ? 12 : 4,
-                y: isFocused ? 8 : 2)
-        .animation(Theme.Motion.standard, value: isFocused)
+        .opacity(item.isPlayable ? (isFocused ? 1 : 0.58) : 0.48)
+        .scaleEffect((isFocused ? 1.06 : 0.9) * (pulse ? 0.94 : 1))
+        .shadow(color: .black.opacity(isFocused ? 0.55 : 0.16),
+                radius: isFocused ? 18 : 4,
+                y: isFocused ? 12 : 2)
+        .animation(Theme.Motion.pop, value: isFocused)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
-        .onLongPressGesture(minimumDuration: 0.5) { onLongPress() }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            withAnimation(Theme.Motion.quick) { pulse = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                withAnimation(Theme.Motion.quick) { pulse = false }
+            }
+            onLongPress()
+        }
         .onHoverIfSupported { onHover($0) }
     }
 
