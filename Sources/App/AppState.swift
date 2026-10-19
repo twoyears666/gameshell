@@ -88,7 +88,7 @@ final class AppState: ObservableObject {
 
     /// 游戏库内容：用户添加的 URL 条目 + 导入的 ROM，混排在一起；被置顶的排在前面
     var libraryItems: [LibraryItem] {
-        let all = games.map { .game($0) } + roms.map { .rom($0) }
+        let all: [LibraryItem] = games.map { LibraryItem.game($0) } + roms.map { LibraryItem.rom($0) }
         let pinned = all.filter { pinnedIdentifiers.contains($0.id) }
         let rest = all.filter { !pinnedIdentifiers.contains($0.id) }
         return pinned + rest
