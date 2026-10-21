@@ -8,6 +8,33 @@ import UIKit
 import AppKit
 #endif
 
+/// Apple 官方的 Metal HUD（性能叠加层）开关。
+///
+/// 为什么只能「启动时生效」：Metal 在第一次创建设备时会读环境变量 MTL_HUD_ENABLED，
+/// 之后运行中改值不会重新生效。所以设置页只负责落盘，真正的 setenv 由
+/// GameshellApp.init 完成，用户改完需要重启 App。
+///
+/// 另外：本 App 的画面链路是「核心出 RGBA 帧 → CGImage → SwiftUI Image」，
+/// 没有自建 Metal 渲染管线，HUD 只在这条链路上有内容时才会显示数据。设置页会如实写明。
+enum GSMetalHUD {
+    static let defaultsKey = "GS.metalHUDEnabled"
+
+    static var isEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: defaultsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
+    }
+
+    /// 在 App 启动最早期调用：把开关同步进进程环境变量
+    static func applyAtLaunch() {
+        if isEnabled {
+            setenv("MTL_HUD_ENABLED", "1", 1)
+        } else {
+            // 显式清掉，避免从 Xcode scheme 继承来的变量让人误以为开关生效了
+            unsetenv("MTL_HUD_ENABLED")
+        }
+    }
+}
+
 /// 全局应用状态：清单、游戏库（URL 条目 + 模拟器 ROM）、最近游玩、启动、自绘浮层。
 /// 本 App 禁用系统弹窗（UIAlertController / NSAlert），所有提示与确认都走 CustomOverlay。
 final class AppState: ObservableObject {

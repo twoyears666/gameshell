@@ -6,6 +6,11 @@ import SwiftUI
 struct GameshellApp: App {
     @StateObject private var state = AppState()
 
+    init() {
+        // Metal HUD 必须在任何 Metal 设备创建之前写进环境变量，所以放在 App 入口最早期
+        GSMetalHUD.applyAtLaunch()
+    }
+
     var body: some Scene {
         #if os(macOS)
         WindowGroup {

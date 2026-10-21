@@ -38,6 +38,7 @@ struct SettingsView: View {
                     GamepadSettingsCard(mapping: state.keyMapping, capture: capture)
                     NDSSettingsCard()
                     MemoryLimitCard()
+                    MetalHUDCard()
                     CoreIntegrationCard()
                     resetCard
                     #else
@@ -891,6 +892,49 @@ private struct CoreIntegrationCard: View {
     var body: some View {
         SettingsCard(title: "核心接入进度", subtitle: "未接入的系统如实标注，不假装能玩") {
             CoreStatusList()
+        }
+    }
+}
+
+// MARK: - Metal HUD
+
+/// Apple 官方 Metal HUD（性能叠加层）开关，主要给 NDS / 3DS / Wii 这类重负载核心调试用。
+///
+/// 两个如实说明：
+///  1) Metal 在第一次创建设备时读 MTL_HUD_ENABLED，运行中改不了，所以必须重启 App；
+///  2) 本 App 的画面链路是「核心出 RGBA 帧 → CGImage → SwiftUI 合成」，没有自建 Metal
+///     渲染管线，HUD 可能什么都显示不出来（真要看帧率得等接了 Metal 渲染器）。
+private struct MetalHUDCard: View {
+    @State private var enabled = GSMetalHUD.isEnabled
+    @State private var changed = false
+
+    var body: some View {
+        SettingsCard(title: "Metal HUD（性能叠加层）",
+                     subtitle: "NDS / 3DS / Wii 等重负载核心的调试开关：启动时打开 Apple 官方的 Metal 性能 HUD") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Toggle(isOn: Binding(get: { enabled },
+                                    set: { newValue in
+                                        enabled = newValue
+                                        GSMetalHUD.isEnabled = newValue
+                                        changed = true
+                                    })) {
+                    Text("启动时启用 Metal HUD")
+                        .font(Theme.Font.body)
+                        .foregroundStyle(Theme.Color.textPrimary)
+                }
+                .tint(Theme.Color.accent)
+
+                Text("改完需要重启 App 才生效（Metal 在创建设备时读取环境变量）。当前画面是核心出帧 → CGImage → SwiftUI 合成，没有自建 Metal 渲染管线，所以可能看不到任何 HUD 内容；等接入 Metal 渲染器后才有帧率数据。")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Color.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if changed {
+                    Text("已保存，退出 App 再打开后生效。")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.accent)
+                }
+            }
         }
     }
 }

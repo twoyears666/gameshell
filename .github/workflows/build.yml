@@ -166,3 +166,60 @@ jobs:
           path: build/Gameshell.tipa
           if-no-files-found: error
           retention-days: 30
+
+  # ============================================================================
+  # 测试用 homebrew ROM（与主构建并行，不拖慢打包）
+  # 为什么单独一个 job：NDS / 3DS / GameCube 的测试程序要用 devkitPro 工具链，
+  # 和 iOS 打包毫无关系；放同一个 job 里会让 IPA 多等几分钟。
+  # 产物全部来自 devkitPro 官方 examples，开源可自行编译，不含任何商业 ROM。
+  # ============================================================================
+  testroms:
+    name: 编译测试 ROM
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 devkitPro 工具链
+        run: |
+          set -euo pipefail
+          wget -q https://apt.devkitpro.org/install-devkitpro-pacman
+          sudo bash ./install-devkitpro-pacman
+          sudo dkp-pacman -S --noconfirm --needed nds-dev 3ds-dev gamecube-dev
+
+      - name: 编译 NDS 测试程序
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/devkitPro/nds-examples.git
+          make -C nds-examples/hello_world -j"$(nproc)"
+
+      - name: 编译 3DS 测试程序
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/devkitPro/3ds-examples.git
+          make -C 3ds-examples/templates/application -j"$(nproc)"
+
+      - name: 编译 GameCube 测试程序
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/devkitPro/gamecube-examples.git
+          make -C gamecube-examples/templates/application -j"$(nproc)"
+
+      - name: 汇总测试 ROM
+        run: |
+          set -euo pipefail
+          mkdir -p test-roms
+          cp nds-examples/hello_world/hello_world.nds test-roms/Test-NDS-hello.nds
+          cp 3ds-examples/templates/application/application.3dsx test-roms/Test-3DS-hello.3dsx
+          cp gamecube-examples/templates/application/application.dol test-roms/Test-GC-hello.dol
+          ls -lh test-roms
+
+      - name: 上传测试 ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-roms
+          path: test-roms/
+          if-no-files-found: error
+          retention-days: 30
