@@ -125,6 +125,10 @@ targets:
           - -lnestopia
           - -lmesens
           - -lmelonds
+          # Dolphin（Wii / GameCube）：自带的 fmt / zstd / pugixml 等依赖都已经合并进
+          # libdolphin.a，且它不编 libretro-common（没有与 Azahar / melonDS 共用的那批符号），
+          # 所以放最后，不参与前面那条「先出现的库先被拉取」的排序。
+          - -ldolphin
           # Azahar 上游在 iOS 下显式链了 CoreFoundation / Foundation。
           # 静态库不传递依赖，所以必须在 App 侧补上。
           - -framework

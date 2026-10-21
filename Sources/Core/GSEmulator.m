@@ -44,6 +44,11 @@ extern id<GSEmulatorCore> GSMelonDSCoreCreate(void);
 extern id<GSEmulatorCore> GSAzaharCoreCreate(void);
 #endif
 
+#if GS_HAVE_DOLPHIN
+/// 实现在 GSWiiCore.mm（ObjC++：Dolphin 是 C++ 库，走 libretro 接口，软件渲染）
+extern id<GSEmulatorCore> GSWiiCoreCreate(void);
+#endif
+
 NSString *const GSEmulatorErrorDomain = @"GSEmulatorErrorDomain";
 
 typedef NS_ENUM(NSInteger, GSEmulatorErrorCode) {
@@ -371,6 +376,11 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
         return GSAzaharCoreCreate();
     }
 #endif
+#if GS_HAVE_DOLPHIN
+    if (system == GSSystemWii) {
+        return GSWiiCoreCreate();
+    }
+#endif
     return nil;
 }
 
@@ -396,6 +406,9 @@ static void _GSReleaseFrameBuffer(void *info, const void *data, size_t size);
 #endif
 #if GS_HAVE_AZAHAR
         dict[@(GSSystem3DS)] = @"Azahar";
+#endif
+#if GS_HAVE_DOLPHIN
+        dict[@(GSSystemWii)] = @"Dolphin";
 #endif
         names = [dict copy];
     });

@@ -127,7 +127,7 @@
                   fileExtensions: @[@"wbfs", @"iso", @"rvz", @"wia", @"dol", @"elf"]
                   plannedCoreName: @"Dolphin"
                plannedCoreLicense: @"GPL-2.0+"
-                      requiresJIT: YES],
+                      requiresJIT: NO],
 
             [self infoWithSystem: GSSystemWiiU
                       identifier: @"wiiu"

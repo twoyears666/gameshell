@@ -14,8 +14,10 @@
 #   melonDS  —— NDS / DSi（Vendor/melonds，GPL-3.0；编入 ARM64 JIT，无 JIT 时自动走解释器）
 #   Azahar   —— Nintendo 3DS（上游 azahar-emu/azahar，GPL-2.0；源码不入库，构建时现克隆现编，
 #               iOS 上走软件渲染 + 解释器，不需要 JIT）
+#   Dolphin  —— Wii / GameCube（上游 libretro/dolphin 的 libretro 形态，GPL-2.0+；
+#               源码不入库，构建时现克隆现编，iOS 上走「无 GL 上下文」的软件光栅器，
+#               JIT 可用时走 JITARM64，不可用时核心自行退回 CachedInterpreter）
 # 尚无源码 / 尚未接入的核心只留空壳库，由 GSBuiltCores.h 里的开关如实标成 0：
-#   · Dolphin(Wii) 需要 GL 硬件渲染宿主层，待立项（本轮不接，不假装接入）；
 #   · Wii U 核心本轮不做。
 #
 # 产物（每个平台一份，互不污染）：
@@ -50,6 +52,7 @@ have_nestopia=0
 have_mesens=0
 have_melonds=0
 have_azahar=0
+have_dolphin=0
 summary=""
 
 log() { printf '[build_cores] %s\n' "$*"; }
@@ -109,13 +112,14 @@ write_header() {
 #define GS_HAVE_MESENS $have_mesens
 #define GS_HAVE_MELONDS $have_melonds
 #define GS_HAVE_AZAHAR $have_azahar
+#define GS_HAVE_DOLPHIN $have_dolphin
 
 #define GS_CORES_PLATFORM "$PLATFORM"
 #define GS_CORES_NOTE "$summary"
 
 #endif
 EOF
-	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Mesen-S=${have_mesens} melonDS=${have_melonds} Azahar=${have_azahar}）"
+	log "写出 ${HEADER}（mGBA=${have_mgba} Nestopia=${have_nestopia} Mesen-S=${have_mesens} melonDS=${have_melonds} Azahar=${have_azahar} Dolphin=${have_dolphin}）"
 }
 
 # 收尾：没编出来的核心补空壳库，然后写编译期开关头。成功编出来的核心不动（不覆盖真库）。
@@ -125,6 +129,7 @@ finalize() {
 	[ "$have_mesens" -eq 1 ] || make_stub_library mesens
 	[ "$have_melonds" -eq 1 ] || make_stub_library melonds
 	[ "$have_azahar" -eq 1 ] || make_stub_library azahar
+	[ "$have_dolphin" -eq 1 ] || make_stub_library dolphin
 	write_header
 }
 
@@ -135,6 +140,7 @@ finish_without_cores() {
 	have_mesens=0
 	have_melonds=0
 	have_azahar=0
+	have_dolphin=0
 	summary="$1"
 	finalize
 	exit 0
@@ -513,6 +519,291 @@ PY
 	return 0
 }
 
+# 交叉编译 Dolphin（Wii / GameCube）libretro 核心，产出一个合并好的 $OUT_DIR/libdolphin.a。
+#
+# 与 Azahar 同一套思路（源码不入库、构建时现克隆现编、最后合并所有 .a），但有三处必须
+# 自己拍板的地方：
+#
+#  1) 上游选 libretro/dolphin，而不是 dolphin-emu/dolphin —— 官方仓库里没有
+#     Source/Core/DolphinLibretro 这层 libretro 前端；只有 libretro 的 fork 有，
+#     且它的顶层 CMake 明确带 IOS 分支（if(IOS) add_definitions(-DIPHONEOS) 等）。
+#
+#  2) Dolphin 的「软件渲染」在 libretro 里仍然会造一个 SWOGLWindow ——
+#     也就是即便只想拿 CPU 帧缓冲，它也要求宿主提供一个 GL 上下文
+#     （GLContextLR → 前端 SET_HW_RENDER）。我们没有、也不想为它引一条 GLES 渲染通路，
+#     所以给上游打「headless 补丁」：GL 上下文创建失败时保留 m_gl_context 为空的窗口，
+#     把 GL 相关调用全部跳过，帧由 Libretro::Video::SWGfx::ShowImage 的 video_cb 直接交付。
+#     这个补丁是 Wii 能进本 App 的前提，绝不能丢。
+#
+#  3) 渲染器选项 dolphin_renderer 的 "Software" 项在上游被
+#     #if defined(_DEBUG) || defined(DEBUGFAST) 包着 —— Release 构建里根本不存在。
+#     宿主答 "Software" 会被选项校验打回默认值 "Hardware"，接着走 SET_HW_RENDER 失败 → Null。
+#     因此补丁里必须把 Software/Null 两项从调试宏里放出来。
+#
+# JIT：Dolphin 在 iOS 上自己检测可执行内存（Boot.cpp），拿不到时退回 CachedInterpreter。
+# 宿主侧（Sources/Core/GSWiiCore.mm）按 GSJIT 探测结果答 dolphin_cpu_core，
+# 「有 JIT 就一定用 JIT」，没有也不拒绝启动。
+#
+# 产物：target dolphin_libretro 默认是 SHARED，补丁改成 STATIC；
+# 它只含自身目标文件，依赖库（core / video / audio / Externals/*）都是独立 .a，
+# 所以最后用 libtool -static 合并成单一 libdolphin.a，App 只需要一条 -ldolphin。
+build_dolphin_core() {
+	local src_dir="$OUT_DIR/dolphin-src"
+	local build_dir="$OUT_DIR/dolphin-build"
+	local configure_log="$OUT_DIR/dolphin-configure.log"
+	local build_log="$OUT_DIR/dolphin-build.log"
+	local prefix_header="$ROOT/Scripts/dolphin/gs_dolphin_symbol_prefix.h"
+
+	rm -rf "$src_dir" "$build_dir"
+	: > "$configure_log"
+	: > "$build_log"
+
+	if ! command -v python3 >/dev/null 2>&1; then
+		log "找不到 python3，无法给 Dolphin 打补丁（CI 上应通过 brew install python 补上）"
+		return 1
+	fi
+
+	cp "$prefix_header" "$OUT_DIR/gs_dolphin_symbol_prefix.h" >> "$configure_log" 2>&1
+
+	# 只取一层历史：Dolphin 仓库不大，但 --depth 1 仍能省掉大半克隆时间。
+	# 不需要子模块：iOS + LIBRETRO 下 USE_MGBA / libusb / Qt / FFmpeg / SPIRV-Cross 全部关掉。
+	log "克隆 libretro/dolphin（日志：${configure_log}）"
+	if ! git clone --depth 1 https://github.com/libretro/dolphin.git "$src_dir" >> "$configure_log" 2>&1; then
+		log "Dolphin 克隆失败，详情见 ${configure_log}"
+		return 1
+	fi
+
+	log "给 Dolphin 打补丁（静态化 / 放开软件渲染 / headless 呈现 / 符号前缀）"
+	if ! python3 - "$src_dir" <<'PY' >> "$configure_log" 2>&1
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+
+# ---------------------------------------------------------------- 静态化
+path = root / "Source/Core/DolphinLibretro/CMakeLists.txt"
+text = path.read_text()
+old = "add_library(dolphin_libretro SHARED"
+new = "add_library(dolphin_libretro STATIC  # Gameshell 补丁：静态链接进主二进制"
+assert old in text, "找不到 add_library(dolphin_libretro SHARED)"
+path.write_text(text.replace(old, new, 1))
+print("已静态化 dolphin_libretro：", path)
+
+# ---------------------------------------------------------------- 放开软件渲染
+path = root / "Source/Core/DolphinLibretro/Common/Options.cpp"
+text = path.read_text()
+old = """      { "Hardware", "Hardware" },
+  #if defined(_DEBUG) || defined(DEBUGFAST)
+      { "Software", "Software Renderer" },
+      { "Null",     "Null Renderer" },
+  #endif
+"""
+new = """      { "Hardware", "Hardware" },
+      // Gameshell 补丁：Release 也保留软件渲染 —— iOS 上没有可用的硬件渲染通路，
+      // 宿主只会答 "Software"（见 Sources/Core/GSWiiCore.mm 的 gs_retro_lookup_variable）。
+      { "Software", "Software Renderer" },
+      { "Null",     "Null Renderer" },
+"""
+assert old in text, "找不到 dolphin_renderer 的 Hardware/Software 选项表"
+path.write_text(text.replace(old, new, 1))
+print("已放开 Release 下的软件渲染选项：", path)
+
+# ---------------------------------------------------------------- headless 呈现（窗口）
+path = root / "Source/Core/VideoBackends/Software/SWOGLWindow.cpp"
+text = path.read_text()
+
+old = """  if (!window->Initialize(wsi))
+  {
+    PanicAlertFmt("Failed to create OpenGL window");
+    return nullptr;
+  }
+"""
+new = """  if (!window->Initialize(wsi))
+  {
+#ifdef __LIBRETRO__
+    // Gameshell 补丁：libretro 前端直接收 CPU 帧缓冲，不需要 GL 窗口。
+    // 保留一个 m_gl_context 为空的「headless 窗口」，后续 GL 调用一律跳过。
+    WARN_LOG_FMT(VIDEO, "Libretro: no GL context, using CPU-only present path");
+#else
+    PanicAlertFmt("Failed to create OpenGL window");
+    return nullptr;
+#endif
+  }
+"""
+assert old in text, "找不到 SWOGLWindow::Create 的失败分支"
+text = text.replace(old, new, 1)
+
+old = """bool SWOGLWindow::IsHeadless() const
+{
+  return m_gl_context->IsHeadless();
+}
+"""
+new = """bool SWOGLWindow::IsHeadless() const
+{
+  // Gameshell 补丁：CPU-only 路径没有 GL 上下文，一律按 headless 处理
+  return !m_gl_context || m_gl_context->IsHeadless();
+}
+"""
+assert old in text, "找不到 SWOGLWindow::IsHeadless"
+text = text.replace(old, new, 1)
+
+old = """  const SW::SWTexture* sw_image = static_cast<const SW::SWTexture*>(image);
+  m_gl_context->Update();"""
+new = """  const SW::SWTexture* sw_image = static_cast<const SW::SWTexture*>(image);
+  // Gameshell 补丁：没有 GL 上下文时不做任何 GL blit（帧已由 video_cb 交出去）
+  if (!m_gl_context)
+    return;
+  m_gl_context->Update();"""
+assert old in text, "找不到 SWOGLWindow::ShowImage 的开头"
+text = text.replace(old, new, 1)
+
+path.write_text(text)
+print("已给 SWOGLWindow 加 headless 分支：", path)
+
+# ---------------------------------------------------------------- headless 呈现（SWGfx）
+path = root / "Source/Core/VideoBackends/Software/SWGfx.cpp"
+text = path.read_text()
+
+old = """bool SWGfx::IsHeadless() const
+{
+  return m_window->IsHeadless();
+}
+"""
+new = """bool SWGfx::IsHeadless() const
+{
+  // Gameshell 补丁：没有窗口（或窗口没有 GL 上下文）时按 headless 处理
+  return !m_window || m_window->IsHeadless();
+}
+"""
+assert old in text, "找不到 SWGfx::IsHeadless"
+text = text.replace(old, new, 1)
+
+old = """  GLContext* context = m_window->GetContext();
+  context->Update();
+  g_presenter->SetBackbuffer(context->GetBackBufferWidth(), context->GetBackBufferHeight());
+  return true;
+"""
+new = """  GLContext* context = m_window ? m_window->GetContext() : nullptr;
+  if (!context)
+  {
+    // Gameshell 补丁：CPU-only 路径没有 GL 上下文，按 EFB 原生尺寸当后缓冲
+    g_presenter->SetBackbuffer(640, 480);
+    return true;
+  }
+  context->Update();
+  g_presenter->SetBackbuffer(context->GetBackBufferWidth(), context->GetBackBufferHeight());
+  return true;
+"""
+assert old in text, "找不到 SWGfx::BindBackbuffer 的上下文使用段"
+text = text.replace(old, new, 1)
+
+old = """  GLContext* context = m_window->GetContext();
+  return {std::max(context->GetBackBufferWidth(), 1u), std::max(context->GetBackBufferHeight(), 1u),
+          1.0f, AbstractTextureFormat::RGBA8};
+"""
+new = """  GLContext* context = m_window ? m_window->GetContext() : nullptr;
+  if (!context)
+  {
+    // Gameshell 补丁：CPU-only 路径按 EFB 原生尺寸报告表面（Wii / GameCube 都是 640x480 起）
+    return {640, 480, 1.0f, AbstractTextureFormat::RGBA8};
+  }
+  return {std::max(context->GetBackBufferWidth(), 1u), std::max(context->GetBackBufferHeight(), 1u),
+          1.0f, AbstractTextureFormat::RGBA8};
+"""
+assert old in text, "找不到 SWGfx::GetSurfaceInfo"
+text = text.replace(old, new, 1)
+
+path.write_text(text)
+print("已给 SWGfx 加 headless 分支：", path)
+PY
+	then
+		log "Dolphin 补丁段没对上（上游可能改过），详情见 ${configure_log}"
+		return 1
+	fi
+
+	log "配置 Dolphin（交叉编译到 iOS arm64，日志：${configure_log}）"
+	cmake -S "$src_dir" -B "$build_dir" \
+		-DCMAKE_SYSTEM_NAME=iOS \
+		-DCMAKE_OSX_SYSROOT="$SDK_NAME" \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
+		-DCMAKE_C_COMPILER="$CC" \
+		-DCMAKE_CXX_COMPILER="$CXX" \
+		-DCMAKE_OBJC_COMPILER="$CC" \
+		-DCMAKE_OBJCXX_COMPILER="$CXX" \
+		-DCMAKE_ASM_COMPILER="$CC" \
+		-DCMAKE_C_COMPILER_WORKS=1 \
+		-DCMAKE_CXX_COMPILER_WORKS=1 \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DLIBRETRO=ON \
+		-DENABLE_QT=OFF \
+		-DENABLE_TESTS=OFF \
+		-DENABLE_LTO=OFF \
+		-DENABLE_VULKAN=OFF \
+		-DENABLE_SDL=OFF \
+		-DENABLE_CUBEB=OFF \
+		-DENABLE_LLVM=OFF \
+		-DENABLE_ANALYTICS=OFF \
+		-DENABLE_CLI_TOOL=OFF \
+		-DENABLE_AUTOUPDATE=OFF \
+		-DENCODE_FRAMEDUMPS=OFF \
+		-DUSE_MGBA=OFF \
+		-DUSE_UPNP=OFF \
+		-DUSE_DISCORD_PRESENCE=OFF \
+		-DUSE_RETRO_ACHIEVEMENTS=OFF \
+		-DMACOS_CODE_SIGNING=OFF \
+		-DCMAKE_C_FLAGS="-include $prefix_header" \
+		-DCMAKE_CXX_FLAGS="-include $prefix_header" \
+		>> "$configure_log" 2>&1
+	if [ $? -ne 0 ]; then
+		log "Dolphin 的 cmake 配置失败，详情见 ${configure_log}"
+		return 1
+	fi
+
+	log "开始编译 Dolphin libretro 核心（日志：${build_log}，这一步很重，会很久）"
+	cmake --build "$build_dir" --target dolphin_libretro --parallel 4 >> "$build_log" 2>&1
+	if [ $? -ne 0 ]; then
+		log "Dolphin 编译失败，详情见 ${build_log}"
+		return 1
+	fi
+
+	# 合并所有静态库：dolphin_libretro.a 只含自身目标文件，
+	# core / video / audio / Externals 下的依赖 .a 不会自动并进去。
+	local -a libs
+	libs=()
+	while IFS= read -r line; do
+		libs+=("$line")
+	done < <(find "$build_dir" -name '*.a' -type f)
+	if [ "${#libs[@]}" -eq 0 ]; then
+		log "编译成功但没找到任何 .a，详情见 ${build_log}"
+		return 1
+	fi
+
+	local libtool
+	libtool="$(xcrun --find libtool 2>/dev/null || command -v libtool || true)"
+	if [ -z "$libtool" ]; then
+		log "找不到 libtool，无法合并 Dolphin 静态库"
+		return 1
+	fi
+
+	log "合并 ${#libs[@]} 个静态库为 libdolphin.a（日志：${configure_log}）"
+	rm -f "$OUT_DIR/libdolphin.a"
+	if ! "$libtool" -static -o "$OUT_DIR/libdolphin.a" "${libs[@]}" >> "$configure_log" 2>&1; then
+		log "libtool 合并失败，详情见 ${configure_log}"
+		return 1
+	fi
+	if [ ! -s "$OUT_DIR/libdolphin.a" ]; then
+		log "libtool 没有产出 libdolphin.a，详情见 ${configure_log}"
+		return 1
+	fi
+
+	log "完成：${OUT_DIR}/libdolphin.a（$(du -h "$OUT_DIR/libdolphin.a" | cut -f1)）"
+
+	# 产物留下，源码树与中间产物删掉（体量大，别给后续 Xcode 构建留磁盘压力）
+	rm -rf "$src_dir" "$build_dir"
+	return 0
+}
+
 # ---------------------------------------------------------------- macOS：不接核心
 # 桌面端保持纯 URL 模式：模拟器相关 UI 在 Swift 侧是 #if os(iOS) 门禁的，
 # macOS 不编译也不链接任何核心，省掉一整条交叉编译风险。
@@ -657,6 +948,18 @@ if build_azahar_core; then
 	have_azahar=1
 fi
 
+# ---------------------------------------------------------------- Dolphin（Wii / GameCube）
+# 上游 libretro/dolphin 的 libretro 形态（GPL-2.0+），宿主侧走 libretro 接口
+# （见 Sources/Core/GSWiiCore.mm）。
+#   · 源码不入库，构建时 git clone --depth 1 现取现编，构建完即删。因此这一步需要网络。
+#   · 渲染：软件光栅器 + CPU 帧缓冲；上游仍会尝试建 GL 窗口，构建脚本会打「headless」补丁
+#     让它在没有 GL 上下文时照样交付 video_cb 帧（见 build_dolphin_core() 注释）。
+#   · CPU：JITARM64 与 CachedInterpreter 都编进库里，运行时由核心按可执行内存探测结果选择；
+#     宿主再按 GSJIT 探测结果答 dolphin_cpu_core，「有 JIT 就一定用 JIT」。
+if build_dolphin_core; then
+	have_dolphin=1
+fi
+
 # ---------------------------------------------------------------- 汇总
 built=""
 [ "$have_mgba" -eq 1 ] && built="${built}mGBA（GBA/GB/GBC）、"
@@ -664,6 +967,7 @@ built=""
 [ "$have_mesens" -eq 1 ] && built="${built}Mesen-S（SNES）、"
 [ "$have_melonds" -eq 1 ] && built="${built}melonDS（NDS/DSi）、"
 [ "$have_azahar" -eq 1 ] && built="${built}Azahar（3DS）、"
+[ "$have_dolphin" -eq 1 ] && built="${built}Dolphin（Wii/GameCube）、"
 if [ -z "$built" ]; then
 	summary="本次没有核心编译成功（见各 *-configure.log / *-build.log）"
 else

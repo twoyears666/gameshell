@@ -107,8 +107,8 @@ typedef NS_ENUM(NSInteger, GSJITStatus) {
 /// 视频输出尺寸（载入 ROM 后才有效）
 @property (nonatomic, assign, readonly) size_t videoWidth;
 @property (nonatomic, assign, readonly) size_t videoHeight;
-/// 该平台是否必须开 JIT 才能启动（目前只有 Wii / Wii U 为 YES；
-/// 3DS 与 NDS 都是双模式：有 JIT 就用 JIT，没有就降级解释器，不拒绝启动）
+/// 该平台是否必须开 JIT 才能启动（目前只有 Wii U 为 YES；
+/// Wii / 3DS / NDS 都是双模式：有 JIT 就用 JIT，没有就降级解释器，不拒绝启动）
 @property (nonatomic, assign, readonly) BOOL requiresJIT;
 
 /// 载入 ROM；savePath 是电池存档（.sav）的路径，由核心自行读写
