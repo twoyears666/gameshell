@@ -129,6 +129,9 @@ targets:
           # libdolphin.a，且它不编 libretro-common（没有与 Azahar / melonDS 共用的那批符号），
           # 所以放最后，不参与前面那条「先出现的库先被拉取」的排序。
           - -ldolphin
+          # Dolphin 的 IOS::HLE::NetIPTopDevice 用了 BSD 解析器接口（res_9_init），
+          # iOS SDK 里有 libresolv.tbd，静态库自身不传递依赖，必须在这里显式链上。
+          - -lresolv
           # Azahar 上游在 iOS 下显式链了 CoreFoundation / Foundation。
           # 静态库不传递依赖，所以必须在 App 侧补上。
           - -framework
