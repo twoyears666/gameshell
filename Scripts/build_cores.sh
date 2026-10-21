@@ -566,10 +566,43 @@ build_dolphin_core() {
 	cp "$prefix_header" "$OUT_DIR/gs_dolphin_symbol_prefix.h" >> "$configure_log" 2>&1
 
 	# 只取一层历史：Dolphin 仓库不大，但 --depth 1 仍能省掉大半克隆时间。
-	# 不需要子模块：iOS + LIBRETRO 下 USE_MGBA / libusb / Qt / FFmpeg / SPIRV-Cross 全部关掉。
 	log "克隆 libretro/dolphin（日志：${configure_log}）"
 	if ! git clone --depth 1 https://github.com/libretro/dolphin.git "$src_dir" >> "$configure_log" 2>&1; then
 		log "Dolphin 克隆失败，详情见 ${configure_log}"
+		return 1
+	fi
+
+	# 必须初始化一部分子模块：Dolphin 把 fmt / zstd / zlib-ng / lz4 / curl / spng 等
+	# 直接以子模块形式放在 Externals/ 下，顶层 CMake 对这些库是「找不到系统库就用自带」，
+	# 而 iOS 交叉编译根本不可能命中系统库 —— 于是 configure 阶段会去 add_subdirectory
+	# 那些空目录，直接报 "does not contain a CMakeLists.txt file"。
+	#
+	# 这里只拉 iOS + LIBRETRO 真正会用到的那批，Windows/Qt/FFmpeg/libusb/SDL/cubeb/
+	# mGBA/rcheevos/watcher/gtest 等都被我们的 cmake 开关关掉或按平台跳过，不拉。
+	# 少拉一个就要多跑一轮 CI，所以下面的清单必须和顶层 CMakeLists 的引入条件对得上。
+	local dolphin_submodules=(
+		Externals/cpp-optparse/cpp-optparse
+		Externals/fmt/fmt
+		Externals/imgui/imgui
+		Externals/implot/implot
+		Externals/glslang/glslang
+		Externals/spirv_cross/SPIRV-Cross
+		Externals/tinygltf/tinygltf
+		Externals/pugixml/pugixml
+		Externals/enet/enet
+		Externals/xxhash/xxHash
+		Externals/bzip2/bzip2
+		Externals/zstd/zstd
+		Externals/zlib-ng/zlib-ng
+		Externals/minizip-ng/minizip-ng
+		Externals/lz4/lz4
+		Externals/libspng/libspng
+		Externals/curl/curl
+		Externals/SFML/SFML
+	)
+	log "拉取 Dolphin 依赖子模块（${#dolphin_submodules[@]} 个，日志：${configure_log}）"
+	if ! git -C "$src_dir" submodule update --init --depth 1 "${dolphin_submodules[@]}" >> "$configure_log" 2>&1; then
+		log "Dolphin 子模块拉取失败，详情见 ${configure_log}"
 		return 1
 	fi
 
