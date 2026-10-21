@@ -721,11 +721,15 @@ PY
 		return 1
 	fi
 
+	# CMAKE_SYSTEM_PROCESSOR 必须显式给 arm64：Dolphin 顶层 CMake 用它判断「这是不是
+	# 它认识的 64 位架构」，iOS 交叉编译时该变量默认是空的，会直接 fatal
+	# （"You're building on an unsupported platform: '' with 8-byte pointers"）。
 	log "配置 Dolphin（交叉编译到 iOS arm64，日志：${configure_log}）"
 	cmake -S "$src_dir" -B "$build_dir" \
 		-DCMAKE_SYSTEM_NAME=iOS \
 		-DCMAKE_OSX_SYSROOT="$SDK_NAME" \
 		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_SYSTEM_PROCESSOR=arm64 \
 		-DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
 		-DCMAKE_C_COMPILER="$CC" \
 		-DCMAKE_CXX_COMPILER="$CXX" \
