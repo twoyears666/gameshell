@@ -37,6 +37,7 @@ struct SettingsView: View {
                     KeyboardSettingsCard(mapping: state.keyMapping, capture: capture)
                     GamepadSettingsCard(mapping: state.keyMapping, capture: capture)
                     NDSSettingsCard()
+                    MemoryLimitCard()
                     CoreIntegrationCard()
                     resetCard
                     #else
@@ -801,6 +802,86 @@ private struct NDSSettingsCard: View {
             GSLog.tag("nds", message: "导入 BIOS 失败：\(error.localizedDescription)")
         }
         revision += 1
+    }
+}
+
+// MARK: - 内存上限
+
+/// 内存上限：tipa 启动时自动提升；普通 IPA 靠公开 entitlement，额度由机型决定。
+/// 全部数值来自真实探测，取不到就显示「未知」。
+private struct MemoryLimitCard: View {
+    @State private var status: GSRAMLimitStatus = GSRAMLimit.status()
+    @State private var applied: UInt64 = GSRAMLimit.appliedLimitBytes()
+    @State private var available: UInt64 = GSRAMLimit.availableMemoryBytes()
+    @State private var physical: UInt64 = GSRAMLimit.physicalMemoryBytes()
+
+    var body: some View {
+        SettingsCard(title: "增加内存上限",
+                     subtitle: "tipa（TrollStore）启动时自动把进程上限提到物理内存的 3/4；普通 IPA 携带公开内存 entitlement，实际额度由机型与系统决定") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                row(title: "当前状态", value: statusText, accent: status == .raised)
+
+                if applied > 0 {
+                    row(title: "进程上限", value: bytesText(applied))
+                }
+                row(title: "可用内存", value: bytesText(available))
+                row(title: "物理内存", value: bytesText(physical))
+
+                if status != .raised {
+                    Text("运行时提升不可用：当前安装方式没有内存权限。用 tipa 安装可自动提升；普通 IPA 依赖公开 entitlement，额度由系统决定。")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Color.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack {
+                    Spacer(minLength: 0)
+                    PillButton(title: "重新探测", style: .secondary) { refresh(force: true) }
+                        .frame(width: 130)
+                }
+            }
+        }
+        .onAppear { refresh(force: false) }
+    }
+
+    private var statusText: String {
+        switch status {
+        case .raised:
+            return "已自动扩展"
+        case .unavailable:
+            return "未扩展"
+        default:
+            return "未知"
+        }
+    }
+
+    private func row(title: String, value: String, accent: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Color.textSecondary)
+            Spacer(minLength: Theme.Spacing.sm)
+            Text(value)
+                .font(Theme.Font.caption)
+                .foregroundStyle(accent ? Theme.Color.accent : Theme.Color.textPrimary)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func bytesText(_ bytes: UInt64) -> String {
+        guard bytes > 0 else { return "未知" }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
+    }
+
+    /// force=false 时复用启动时的探测结果；force=true 重新尝试提升
+    private func refresh(force: Bool) {
+        if force {
+            _ = GSRAMLimit.applyIfNeeded()
+        }
+        status = GSRAMLimit.status()
+        applied = GSRAMLimit.appliedLimitBytes()
+        available = GSRAMLimit.availableMemoryBytes()
+        physical = GSRAMLimit.physicalMemoryBytes()
     }
 }
 

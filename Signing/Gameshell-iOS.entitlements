@@ -13,6 +13,15 @@
 		<string>com.twoyears666.gameshell</string>
 	</array>
 	<key>get-task-allow</key>
-	<true/>
+        <true/>
+
+        <!-- ===== 增加内存上限（公开 entitlement）=====
+             3DS / NDS 核心需要比默认 jetsam 上限更多的内存。这份 entitlement 由系统在
+             启动时按机型放宽额度；实际能拿到多少由设备决定，App 里用
+             os_proc_available_memory 如实显示，不假装已经扩到某个固定值。
+             tipa 另外带 com.apple.private.memorystatus，启动时会主动把上限提到物理内存的
+             3/4（见 Sources/Core/GSRAMLimit.m）；普通 IPA 只有这一份公开能力的基线。 -->
+        <key>com.apple.developer.kernel.increased-memory-limit</key>
+        <true/>
 </dict>
 </plist>

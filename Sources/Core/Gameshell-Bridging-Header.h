@@ -23,5 +23,8 @@
 #import "GSROMLibrary.h"
 #import "GSEmulator.h"
 
+// 内存上限：TrollStore 版自动提升，普通 IPA 版如实显示公开 entitlement 的效果
+#import "GSRAMLimit.h"
+
 // NDS 专属：BIOS / 固件导入与双屏布局等选项
 #import "GSNDSSupport.h"
