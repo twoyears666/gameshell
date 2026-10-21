@@ -606,7 +606,7 @@ build_dolphin_core() {
 		return 1
 	fi
 
-	log "给 Dolphin 打补丁（静态化 / 放开软件渲染 / headless 呈现 / 符号前缀）"
+	log "给 Dolphin 打补丁（静态化 / 放开软件渲染 / headless 呈现 / 符号前缀 / GBA 配置守卫）"
 	if ! python3 - "$src_dir" <<'PY' >> "$configure_log" 2>&1
 import pathlib
 import sys
@@ -748,6 +748,38 @@ text = text.replace(old, new, 1)
 
 path.write_text(text)
 print("已给 SWGfx 加 headless 分支：", path)
+
+# ---------------------------------------------------------------- GBA 配置项编译守卫
+path = root / "Source/Core/DolphinLibretro/Boot.cpp"
+text = path.read_text()
+
+old = """  if (Libretro::GBPlayer_active)
+  {
+    Config::SetBase(Config::MAIN_GBA_ROM_PATHS[Config::GBPLAYER_GBA_INDEX], Libretro::GBPlayer_rom_path);
+"""
+new = """#ifdef HAS_LIBMGBA
+  // Gameshell 补丁：上面这些 Config:: 项在 MainSettings.h 里被 #ifdef HAS_LIBMGBA 包着，
+  // 我们按 USE_MGBA=OFF 编译（GBA 由宿主的 mGBA 核心负责，不需要 Dolphin 内置一份），
+  // 上游这里没加同样的守卫，会直接编译失败。
+  if (Libretro::GBPlayer_active)
+  {
+    Config::SetBase(Config::MAIN_GBA_ROM_PATHS[Config::GBPLAYER_GBA_INDEX], Libretro::GBPlayer_rom_path);
+"""
+assert old in text, "找不到 Boot.cpp 的 GBPlayer 配置写入段"
+text = text.replace(old, new, 1)
+
+old = """  else
+  {
+    Config::SetBase(Config::MAIN_GBA_ROM_PATHS[Config::GBPLAYER_GBA_INDEX], std::string{});
+  }
+"""
+new = old + """#endif
+"""
+assert old in text, "找不到 Boot.cpp 的 GBPlayer 配置清空段"
+text = text.replace(old, new, 1)
+
+path.write_text(text)
+print("已给 Boot.cpp 的 GBA 配置项补上 HAS_LIBMGBA 守卫：", path)
 PY
 	then
 		log "Dolphin 补丁段没对上（上游可能改过），详情见 ${configure_log}"
