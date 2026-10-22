@@ -169,12 +169,20 @@ jobs:
 
   # ============================================================================
   # 测试用 homebrew ROM（与主构建并行，不拖慢打包）
-  # 为什么单独一个 job：NDS / 3DS / GameCube 的测试程序要用 devkitPro 工具链，
+  # 为什么单独一个 job：Wii 的测试程序要用 devkitPro 的 devkitPPC 工具链，
   # 和 iOS 打包毫无关系；放同一个 job 里会让 IPA 多等几分钟。
   # 产物全部来自 devkitPro 官方 examples，开源可自行编译，不含任何商业 ROM。
+  # 只编 Wii：本轮验证目标是 Dolphin 核心，NDS / 3DS 的测试 ROM 等以后需要再加。
+  #   · Test-Wii-triangle.dol   —— GX 旋转三角形，验证「能启动 + 持续出帧」
+  #   · Test-Wii-neHe04.dol     —— NeHe 第 4 课（旋转立方体），验证 3D 光栅化负载
+  #
+  # 为什么用官方 Docker 镜像而不是 apt 装：apt.devkitpro.org 现在对本机 / CI 的
+  # 请求一律回 403（Cloudflare 拦截），install-devkitpro-pacman 直接下不下来，
+  # 整步 wget 就以 exit 8 失败。devkitpro/devkitppc 镜像自带完整工具链 +
+  # libogc，runner 上直接 docker run 更稳，也不用 sudo。
   # ============================================================================
-  testroms:
-    name: 编译测试 ROM
+  wiitestroms:
+    name: 编译 Wii 测试 ROM
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -182,38 +190,31 @@ jobs:
       - name: 检出源码
         uses: actions/checkout@v4
 
-      - name: 安装 devkitPro 工具链
+      - name: 拉取 devkitPro 官方 Wii 示例
         run: |
           set -euo pipefail
-          wget -q https://apt.devkitpro.org/install-devkitpro-pacman
-          sudo bash ./install-devkitpro-pacman
-          sudo dkp-pacman -S --noconfirm --needed nds-dev 3ds-dev gamecube-dev
+          git clone --depth 1 https://github.com/devkitPro/wii-examples.git
 
-      - name: 编译 NDS 测试程序
+      - name: 编译 GX 旋转三角形
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/devkitPro/nds-examples.git
-          make -C nds-examples/hello_world -j"$(nproc)"
+          docker run --rm -v "$PWD":/work -w /work \
+            devkitpro/devkitppc:latest \
+            make -C wii-examples/graphics/gx/triangle -j"$(nproc)"
 
-      - name: 编译 3DS 测试程序
+      - name: 编译 NeHe 第 4 课（旋转立方体）
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/devkitPro/3ds-examples.git
-          make -C 3ds-examples/templates/application -j"$(nproc)"
-
-      - name: 编译 GameCube 测试程序
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/devkitPro/gamecube-examples.git
-          make -C gamecube-examples/templates/application -j"$(nproc)"
+          docker run --rm -v "$PWD":/work -w /work \
+            devkitpro/devkitppc:latest \
+            make -C wii-examples/graphics/gx/neheGX/lesson04 -j"$(nproc)"
 
       - name: 汇总测试 ROM
         run: |
           set -euo pipefail
           mkdir -p test-roms
-          cp nds-examples/hello_world/hello_world.nds test-roms/Test-NDS-hello.nds
-          cp 3ds-examples/templates/application/application.3dsx test-roms/Test-3DS-hello.3dsx
-          cp gamecube-examples/templates/application/application.dol test-roms/Test-GC-hello.dol
+          cp wii-examples/graphics/gx/triangle/triangle.dol test-roms/Test-Wii-triangle.dol
+          cp wii-examples/graphics/gx/neheGX/lesson04/lesson04.dol test-roms/Test-Wii-nehe04.dol
           ls -lh test-roms
 
       - name: 上传测试 ROM
