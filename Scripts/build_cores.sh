@@ -534,6 +534,10 @@ PY
 #     所以给上游打「headless 补丁」：GL 上下文创建失败时保留 m_gl_context 为空的窗口，
 #     把 GL 相关调用全部跳过，帧由 Libretro::Video::SWGfx::ShowImage 的 video_cb 直接交付。
 #     这个补丁是 Wii 能进本 App 的前提，绝不能丢。
+#     另外，上游在 __LIBRETRO__ 下把 Core::GetInitializedVideoGuard 的 init_video 改成直接
+#     return true，视频后端真正的初始化只挂在「SET_HW_RENDER → 前端回调 ContextReset」上；
+#     软件渲染根本不走 SET_HW_RENDER，于是 Presenter / 顶点管理器 / 纹理缓存全是空指针，
+#     首个视频帧就崩。所以补丁还要在 Main.cpp 里显式补一次后端初始化。
 #
 #  3) 渲染器选项 dolphin_renderer 的 "Software" 项在上游被
 #     #if defined(_DEBUG) || defined(DEBUGFAST) 包着 —— Release 构建里根本不存在。
@@ -606,7 +610,7 @@ build_dolphin_core() {
 		return 1
 	fi
 
-	log "给 Dolphin 打补丁（静态化 / 放开软件渲染 / headless 呈现 / 符号前缀 / GBA 配置守卫）"
+	log "给 Dolphin 打补丁（静态化 / 放开软件渲染 / headless 呈现 / 软件路径后端初始化 / 符号前缀 / GBA 配置守卫）"
 	if ! python3 - "$src_dir" <<'PY' >> "$configure_log" 2>&1
 import pathlib
 import sys
@@ -711,18 +715,28 @@ new = """bool SWGfx::IsHeadless() const
 assert old in text, "找不到 SWGfx::IsHeadless"
 text = text.replace(old, new, 1)
 
-old = """  GLContext* context = m_window->GetContext();
+old = """  // Look for framebuffer resizes
+  if (!g_presenter->SurfaceResizedTestAndClear())
+    return true;
+
+  GLContext* context = m_window->GetContext();
   context->Update();
   g_presenter->SetBackbuffer(context->GetBackBufferWidth(), context->GetBackBufferHeight());
   return true;
 """
-new = """  GLContext* context = m_window ? m_window->GetContext() : nullptr;
-  if (!context)
-  {
-    // Gameshell 补丁：CPU-only 路径没有 GL 上下文，按 EFB 原生尺寸当后缓冲
-    g_presenter->SetBackbuffer(640, 480);
+new = """  // Gameshell 补丁：软件渲染路径上游从来没有真正初始化过后端，
+  // g_presenter 可能是空的；这里绝不直接解引用（初始化见 Main.cpp 的补丁）。
+  if (!g_presenter)
     return true;
-  }
+
+  // Look for framebuffer resizes
+  if (!g_presenter->SurfaceResizedTestAndClear())
+    return true;
+
+  GLContext* context = m_window ? m_window->GetContext() : nullptr;
+  if (!context)
+    return true;
+
   context->Update();
   g_presenter->SetBackbuffer(context->GetBackBufferWidth(), context->GetBackBufferHeight());
   return true;
@@ -748,6 +762,86 @@ text = text.replace(old, new, 1)
 
 path.write_text(text)
 print("已给 SWGfx 加 headless 分支：", path)
+
+# ---------------------------------------------------------------- headless 下仍要出帧
+# Presenter::Present 一开头就 `if (g_gfx->IsHeadless()) return;`。我们的软件渲染窗口
+# 是 headless 的（没有 GL 上下文），于是 ShowImage → video_cb 永远走不到 —— 表现为黑屏。
+# libretro 下把这条早退去掉，帧继续交给 SWGfx::ShowImage（GL blit 那步已被上面的补丁跳过）。
+path = root / "Source/Core/VideoCommon/Present.cpp"
+text = path.read_text()
+
+old = """  if (g_gfx->IsHeadless() || (!m_onscreen_ui && !m_xfb_entry))
+    return;
+"""
+new = """#ifdef __LIBRETRO__
+  // Gameshell 补丁：软件渲染在 libretro 下没有 GL 上下文（IsHeadless 为真），
+  // 但帧必须经由 SWGfx::ShowImage → video_cb 交出去，这里不能直接 return。
+  if (!m_onscreen_ui && !m_xfb_entry)
+    return;
+#else
+  if (g_gfx->IsHeadless() || (!m_onscreen_ui && !m_xfb_entry))
+    return;
+#endif
+"""
+assert old in text, "找不到 Presenter::Present 的 headless 早退"
+text = text.replace(old, new, 1)
+
+path.write_text(text)
+print("已让 libretro 软件渲染在 headless 下继续出帧：", path)
+
+# ---------------------------------------------------------------- 软件渲染路径补后端初始化
+# 上游在 __LIBRETRO__ 下把 Core::GetInitializedVideoGuard 的 init_video 改成直接 return true，
+# 于是 g_video_backend->Initialize() 永远不执行 → VideoBackendBase::InitializeShared 不执行 →
+# g_presenter / g_vertex_manager / g_texture_cache / g_shader_cache 全是 nullptr。
+# 硬件渲染靠「SET_HW_RENDER → 前端回调 ContextReset」补上这一步，而软件渲染根本不走
+# SET_HW_RENDER（见 DolphinLibretro/Video.cpp 的 Init），所以首帧 SWGfx 一碰 presenter 就崩。
+# 修法：在起模拟线程之前自己跑一遍 Video_InitializeBackend()；headless 窗口补丁保证
+# 没有 GL 上下文也能初始化成功。
+path = root / "Source/Core/DolphinLibretro/Main.cpp"
+text = path.read_text()
+
+old = """    WindowSystemInfo wsi(WindowSystemType::Libretro, nullptr, nullptr, nullptr);
+    if (system.IsDualCoreMode())
+"""
+new = """    WindowSystemInfo wsi(WindowSystemType::Libretro, nullptr, nullptr, nullptr);
+
+    // Gameshell 补丁：软件渲染路径补一次后端初始化（上游在 __LIBRETRO__ 下从不做）。
+    // 顺序很关键：必须在本线程里、起模拟线程之前完成初始化，并当场换成带 video_cb 的
+    // Libretro::Video::SWGfx —— 上游原本是「等模拟线程跑起来后再 g_gfx.reset()」，
+    // 那时 GPU 线程已经在用这个对象了，换成真对象之后会变成 use-after-free。
+    if (!g_gfx && Config::Get(Config::MAIN_GFX_BACKEND) == "Software Renderer")
+    {
+      if (!Libretro::Video::Video_InitializeBackend())
+      {
+        ERROR_LOG_FMT(VIDEO, "Libretro: software video backend init failed");
+      }
+      else
+      {
+        g_gfx.reset();
+        g_gfx = std::make_unique<Libretro::Video::SWGfx>();
+      }
+    }
+
+    if (system.IsDualCoreMode())
+"""
+assert old in text, "找不到 retro_run 里起模拟线程的位置"
+text = text.replace(old, new, 1)
+
+old = """    if(Config::Get(Config::MAIN_GFX_BACKEND) == "Software Renderer")
+    {
+      g_gfx.reset();
+      g_gfx = std::make_unique<Libretro::Video::SWGfx>();
+    }
+    else if (Config::Get(Config::MAIN_GFX_BACKEND) == "Null")
+"""
+new = """    // Gameshell 补丁：Software 分支已挪到起模拟线程之前（见上方），这里只剩 Null。
+    if(Config::Get(Config::MAIN_GFX_BACKEND) == "Null")
+"""
+assert old in text, "找不到软件渲染 / Null 的 g_gfx 替换段"
+text = text.replace(old, new, 1)
+
+path.write_text(text)
+print("已在软件渲染路径补后端初始化：", path)
 
 # ---------------------------------------------------------------- GBA 配置项编译守卫
 path = root / "Source/Core/DolphinLibretro/Boot.cpp"
